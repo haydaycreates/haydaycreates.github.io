@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { site } from '../site.config.js';
+import fonts from '../lib/fonts.js';
 
 /**
  * /write/ — the private writing desk.
@@ -18,9 +19,26 @@ const desk = {
   branch: site.writeDesk.branch,
   postsDir: site.writeDesk.postsDir,
   mediaDir: site.writeDesk.mediaDir,
+  resourcesDir: site.writeDesk.resourcesDir,
+  settingsPath: site.writeDesk.settingsPath,
 };
 
 const newTokenUrl = 'https://github.com/settings/personal-access-tokens/new';
+
+/* The typeface picks for the Settings view — the same library the build uses,
+   so what you choose here is what the site renders. */
+const FONT_OPTIONS = fonts.FONTS;
+const SIZE_OPTIONS = [
+  { id: 'small', label: 'Small' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'large', label: 'Large' },
+];
+const SOCIAL_ADDS = [
+  { id: 'x', label: 'X' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'github', label: 'GitHub' },
+  { id: 'linkedin', label: 'LinkedIn' },
+];
 
 const TOOLS = [
   { tool: 'bold', label: 'B', title: 'Bold — **words**', class: 'is-bold' },
@@ -169,6 +187,7 @@ const FACES = [
         </div>
         <div class="desk-bar-actions">
           <button class="btn btn-accent" type="button" data-new>New post</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-settings>Settings</button>
           <button class="btn btn-ghost btn-sm" type="button" data-lock-now>Lock</button>
         </div>
       </div>
@@ -195,7 +214,187 @@ const FACES = [
       </div>
     </section>
 
-    <!-- =========================== 3 · editor ============================= -->
+    <!-- =========================== 3 · settings =========================== -->
+    <!-- The owner-editable half of the site. Everything in the first five
+         sections lives in src/data/settings.json and is committed by the one
+         Save button; resources are one markdown file each in
+         src/content/resources/, so they commit as you change them. -->
+    <section class="desk-view desk-settings-view" data-view="settings" hidden>
+      <div class="desk-editor-bar">
+        <button class="btn btn-ghost btn-sm" type="button" data-settings-back>← Library</button>
+        <span class="desk-state" data-settings-state>Settings</span>
+        <span class="desk-count" data-settings-dirty></span>
+      </div>
+
+      <p class="desk-note" data-settings-note role="status" aria-live="polite"></p>
+
+      <div class="desk-settings">
+        <!-- site identity -->
+        <section class="desk-set" data-set="identity">
+          <h2 class="desk-set-title">Site identity</h2>
+          <p class="desk-set-sub">The masthead, the browser tab, and the top of the home page.</p>
+          <div class="desk-fields">
+            <label class="desk-field">
+              <span class="desk-label">Site title</span>
+              <input class="desk-input" type="text" autocomplete="off" data-setting="title" />
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Tagline</span>
+              <input class="desk-input" type="text" autocomplete="off" data-setting="tagline" />
+              <span class="desk-hint">Used in the browser tab, search results and the RSS feed.</span>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Hero kicker</span>
+              <input class="desk-input" type="text" autocomplete="off" data-setting="hero.kicker" />
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Hero heading</span>
+              <input class="desk-input" type="text" autocomplete="off" data-setting="hero.heading" />
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Hero intro</span>
+              <textarea class="desk-input desk-area-sm" rows="3" data-setting="hero.intro"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <!-- about you -->
+        <section class="desk-set" data-set="about">
+          <h2 class="desk-set-title">About you</h2>
+          <p class="desk-set-sub">The About card, the home-page strip, and the address everything is signed with.</p>
+          <div class="desk-fields">
+            <div class="desk-field">
+              <span class="desk-label">Portrait</span>
+              <div class="desk-portrait-row">
+                <img class="desk-portrait-preview" data-portrait-preview alt="Your portrait as it appears on the site" hidden />
+                <input class="desk-input" type="text" autocomplete="off" spellcheck="false" placeholder="/uploads/… or a full URL" data-setting="author.photo" />
+                <button class="btn btn-ghost btn-sm" type="button" data-upload="portrait">Upload</button>
+              </div>
+              <span class="desk-hint">Uploaded to public/uploads/ and shown on the home page and /about/.</span>
+            </div>
+            <label class="desk-field">
+              <span class="desk-label">Name</span>
+              <input class="desk-input" type="text" autocomplete="off" data-setting="author.name" />
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Role</span>
+              <input class="desk-input" type="text" autocomplete="off" placeholder="Student · Active reader" data-setting="author.role" />
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Email</span>
+              <input class="desk-input" type="email" autocomplete="off" spellcheck="false" placeholder="you@example.com" data-setting="author.email" />
+              <span class="desk-hint">Your contact address — the Newsletter section below uses the same setting.</span>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">About heading</span>
+              <input class="desk-input" type="text" autocomplete="off" placeholder="Hello, I'm …" data-setting="author.aboutHeading" />
+              <span class="desk-hint">The big line at the top of /about/. Left empty, the heading in src/content/pages/about.md is used.</span>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Bio</span>
+              <textarea class="desk-input desk-area-sm" rows="3" data-setting="author.shortBio"></textarea>
+              <span class="desk-hint">Shown trimmed on the home page's About strip.</span>
+            </label>
+          </div>
+        </section>
+
+        <!-- social links -->
+        <section class="desk-set" data-set="social">
+          <h2 class="desk-set-title">Social links</h2>
+          <p class="desk-set-sub">Shown in the footer and on the About card. A link with no address is left out.</p>
+          <ul class="desk-social" data-social-list></ul>
+          <div class="desk-social-add">
+            {SOCIAL_ADDS.map((preset) => (
+              <button class="btn btn-ghost btn-sm" type="button" data-social-add={preset.id}>+ {preset.label}</button>
+            ))}
+            <button class="btn btn-ghost btn-sm" type="button" data-social-add="custom">+ Custom link</button>
+          </div>
+        </section>
+
+        <!-- appearance -->
+        <section class="desk-set" data-set="appearance">
+          <h2 class="desk-set-title">Appearance</h2>
+          <p class="desk-set-sub">The typefaces and reading size the whole site is built with. The preview updates as you choose.</p>
+          <div class="desk-fields">
+            <label class="desk-field">
+              <span class="desk-label">Body typeface</span>
+              <select class="desk-input" data-setting="typography.body">
+                {FONT_OPTIONS.map((font) => <option value={font.id}>{font.label} — {font.note}</option>)}
+              </select>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Heading typeface</span>
+              <select class="desk-input" data-setting="typography.heading">
+                {FONT_OPTIONS.map((font) => <option value={font.id}>{font.label} — {font.note}</option>)}
+              </select>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Reading size</span>
+              <select class="desk-input" data-setting="typography.size">
+                {SIZE_OPTIONS.map((size) => <option value={size.id}>{size.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <div class="desk-type-preview" data-type-preview>
+            <p class="desk-type-kicker" data-type-kicker>A personal blog</p>
+            <h3 class="desk-type-heading" data-type-heading>Notes from the slow lane of the internet.</h3>
+            <p class="desk-type-body" data-type-body>Long-ish thoughts on writing, craft, and the small systems that keep a creative life running.</p>
+            <p class="desk-type-note">A live taste of your home page — save to publish it.</p>
+          </div>
+        </section>
+
+        <!-- newsletter -->
+        <section class="desk-set" data-set="newsletter">
+          <h2 class="desk-set-title">Newsletter</h2>
+          <p class="desk-set-sub">
+            With no endpoint, the subscribe form opens the visitor's own mail app with a
+            “please add me” message addressed to you — no third party, no server.
+          </p>
+          <div class="desk-fields">
+            <label class="desk-field">
+              <span class="desk-label">Subscriptions arrive at</span>
+              <input class="desk-input" type="email" autocomplete="off" spellcheck="false" placeholder="you@example.com" data-setting="author.email" />
+              <span class="desk-hint">The same address as your contact email — the mailto flow writes to it.</span>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Heading</span>
+              <input class="desk-input" type="text" autocomplete="off" data-setting="newsletter.heading" />
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Blurb</span>
+              <textarea class="desk-input desk-area-sm" rows="2" data-setting="newsletter.blurb"></textarea>
+            </label>
+            <label class="desk-field">
+              <span class="desk-label">Form-service endpoint (optional)</span>
+              <input class="desk-input" type="text" autocomplete="off" spellcheck="false" placeholder="https://buttondown.email/api/emails/embed-subscribe/…" data-setting="newsletter.endpoint" />
+              <span class="desk-hint">Leave empty for the mailto flow. Set it to Buttondown, Formspree or similar and the form POSTs there instead.</span>
+            </label>
+          </div>
+        </section>
+
+        <!-- resources -->
+        <section class="desk-set" data-set="resources">
+          <h2 class="desk-set-title">Resources</h2>
+          <p class="desk-set-sub">
+            The links on /resources/ — one markdown file each in src/content/resources/.
+            Every change here commits straight to your repository as it happens.
+          </p>
+          <p class="desk-hint" data-resource-empty hidden>No resources yet — add the first one below.</p>
+          <ul class="desk-resources" data-resource-list></ul>
+          <button class="btn btn-ghost btn-sm" type="button" data-resource-add>+ Add resource</button>
+        </section>
+      </div>
+
+      <div class="desk-actions">
+        <span class="desk-autosave" data-settings-saved></span>
+        <div class="desk-actions-right">
+          <button class="btn btn-ghost" type="button" data-settings-reload>Discard changes</button>
+          <button class="btn btn-accent" type="button" data-settings-save>Save settings</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== 4 · editor ============================= -->
     <section class="desk-view desk-editor-view" data-view="editor" hidden>
       <div class="desk-editor-bar">
         <button class="btn btn-ghost btn-sm" type="button" data-back>← Library</button>
@@ -386,10 +585,9 @@ const FACES = [
         </div>
       </div>
 
-      <input class="sr-only" type="file" accept="image/*" data-file-input tabindex="-1" aria-hidden="true" />
     </section>
 
-    <!-- ============================ 4 · done ============================== -->
+    <!-- ============================ 5 · done ============================== -->
     <section class="desk-view" data-view="done" hidden>
       <div class="desk-done">
         <p class="eyebrow">Committed</p>
@@ -414,6 +612,10 @@ const FACES = [
         </div>
       </div>
     </section>
+
+    <!-- Shared by the editor (cover, inline photos) and Settings (portrait):
+         one hidden picker, driven by whichever Upload button was tapped. -->
+    <input class="sr-only" type="file" accept="image/*" data-file-input tabindex="-1" aria-hidden="true" />
   </div>
 
   <script>
@@ -624,6 +826,52 @@ const FACES = [
   .desk-done-facts dd { margin: 0; min-width: 0; }
   .desk-done-facts code { font-family: var(--mono); }
   .desk-done-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* ------------------------------------------------------------- settings */
+  .desk-settings-view { padding-bottom: 20px; }
+  .desk-settings { display: grid; gap: 18px; margin-top: 18px; max-width: 760px; }
+  .desk-set {
+    background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 20px 18px; box-shadow: var(--shadow-sm);
+  }
+  .desk-set-title { font-size: 1.18rem; margin: 0 0 .25em; }
+  .desk-set-sub { color: var(--muted); font-size: .88rem; margin: 0 0 14px; max-width: 62ch; }
+  .desk-set .desk-fields { margin-top: 0; }
+  .desk-set select.desk-input { appearance: auto; min-height: 44px; }
+
+  .desk-portrait-row { display: flex; gap: 10px; align-items: center; }
+  .desk-portrait-row .desk-input { font-family: var(--mono); font-size: .85rem; }
+  .desk-portrait-preview {
+    width: 64px; height: 64px; flex: none; border-radius: 50%; object-fit: cover;
+    border: 1px solid var(--rule); background: var(--paper-2);
+  }
+
+  .desk-social { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .desk-social-row { display: grid; grid-template-columns: minmax(96px, .45fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .desk-social-label, .desk-social-url { min-width: 0; }
+  .desk-social-url { font-family: var(--mono); font-size: .85rem; }
+  .desk-social-add { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+  .desk-type-preview { margin-top: 16px; padding: 20px 18px; border: 1px dashed var(--rule); border-radius: 12px; background: var(--paper); }
+  .desk-type-kicker { text-transform: uppercase; letter-spacing: .14em; font-size: .72rem; font-weight: 700; color: var(--accent-ink); margin: 0 0 .7em; }
+  .desk-type-heading { margin: 0 0 .45em; line-height: 1.2; letter-spacing: -.015em; color: var(--ink); }
+  .desk-type-body { margin: 0; line-height: 1.75; color: #322b24; }
+  .desk-type-note { margin: 1.1em 0 0; font-size: .78rem; color: var(--muted); font-family: var(--sans); }
+
+  .desk-resources { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 12px; }
+  .desk-resource-card { border: 1px solid var(--rule); border-radius: 12px; padding: 14px; background: var(--paper); }
+  .desk-resource-card.is-new { border-style: dashed; border-color: #d9b8a6; }
+  .desk-resource-pos {
+    margin: 0 0 10px; font-size: .76rem; text-transform: uppercase; letter-spacing: .08em;
+    font-weight: 700; color: var(--muted); word-break: break-all;
+  }
+  .desk-resource-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .desk-resource-confirm { display: inline-flex; gap: 8px; align-items: center; font-size: .85rem; color: var(--ink-soft); }
+
+  @media (max-width: 560px) {
+    .desk-social-row { grid-template-columns: minmax(78px, .38fr) minmax(0, 1fr) auto; }
+    .desk-portrait-row { flex-wrap: wrap; }
+  }
 
   /* ------------------------------------------------------------- wide desk */
   @media (min-width: 960px) {

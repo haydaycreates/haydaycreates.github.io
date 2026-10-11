@@ -6,13 +6,15 @@
  * with it: the built /write/ page is loaded into jsdom, GitHub is replaced by an
  * in-memory repository, and a writer unlocks the desk, opens a post, writes a new
  * one with the pen menu, publishes it, saves a draft, renames a post, hits a
- * protected branch and locks up again.
+ * protected branch, edits the site's settings and resources, and locks up again.
  *
  * What it proves:
  *   · a visitor with no token sees a lock screen and nothing is fetched at all
  *   · unlocking, listing, editing and committing all send the right requests
  *   · the markdown the desk commits is the markdown the site's schema expects
  *   · unfinished writing survives the page being closed, and comes back
+ *   · the Settings view loads settings.json and the resources, previews the
+ *     typography live, and Save settings is exactly one commit
  *
  *   npm run check:desk:ui      (needs `npm run build` first — it reads dist/)
  */
@@ -24,6 +26,13 @@ import { JSDOM } from 'jsdom';
 
 import { mountDesk } from '../src/lib/desk/desk.js';
 import { buildPostFile, toPostData } from '../src/lib/desk/frontmatter.js';
+import {
+  SETTINGS_DEFAULTS,
+  mergeSettings,
+  serializeSettings,
+  buildResourceFile,
+  toResourceFields,
+} from '../src/lib/desk/settings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pagePath = path.join(root, 'dist/write/index.html');
@@ -40,6 +49,8 @@ const CONFIG = {
   branch: 'main',
   postsDir: 'src/content/blog',
   mediaDir: 'public/uploads',
+  resourcesDir: 'src/content/resources',
+  settingsPath: 'src/data/settings.json',
 };
 const TOKEN = 'github_pat_TESTTOKEN';
 
@@ -72,10 +83,38 @@ const SEED = {
     toPostData({ title: 'A rough draft', date: '2026-09-20', tags: '', draft: true }),
     'Not finished.\n'
   ),
+
+  /* The owner-editable settings, in the desk's canonical form: a few keys
+     overridden, everything else left to the defaults. */
+  'src/data/settings.json': serializeSettings(
+    mergeSettings({
+      title: 'The Slow Draft',
+      tagline: 'Seeded by the desk session test.',
+      hero: { heading: 'Seeded hero heading.' },
+      author: { name: 'Chirag Yadav', email: 'hello@example.com' },
+    })
+  ),
+
+  /* Two resources for the Settings view to list, edit, reorder and delete. */
+  'src/content/resources/quiet-tools.md': buildResourceFile({
+    title: 'Quiet Tools',
+    url: 'https://example.com/quiet',
+    category: 'Tools',
+    description: 'The first seeded resource.',
+    order: 0,
+  }),
+  'src/content/resources/slow-reading.md': buildResourceFile({
+    title: 'Slow Reading',
+    url: 'https://example.com/slow',
+    category: 'Reading',
+    description: 'The second seeded resource.',
+    order: 1,
+  }),
 };
 
-function createGitHub({ protectMain = false } = {}) {
+function createGitHub({ protectMain = false, noSettings = false } = {}) {
   const files = new Map(Object.entries(SEED));
+  if (noSettings) files.delete(CONFIG.settingsPath);
   const requests = [];
   let shaCounter = 0;
   const nextSha = () => `sha${(shaCounter += 1)}`.padEnd(40, '0');
@@ -123,30 +162,32 @@ function createGitHub({ protectMain = false } = {}) {
     if (pathname.startsWith(`${repo}/contents/`)) {
       const filePath = pathname.slice(`${repo}/contents/`.length);
 
-      if (method === 'GET' && filePath === CONFIG.postsDir) {
-        return respond(
-          [...files.keys()]
-            .filter((name) => name.startsWith(`${CONFIG.postsDir}/`))
-            .map((name) => ({
+      if (method === 'GET') {
+        /* A file first; otherwise, any folder the in-memory repository has —
+           the desk lists the posts folder and the resources folder alike. */
+        if (files.has(filePath)) {
+          const content = files.get(filePath);
+          return respond({
+            name: filePath.split('/').pop(),
+            path: filePath,
+            sha: 'read-sha',
+            content: Buffer.from(content, 'utf8').toString('base64'),
+            encoding: 'base64',
+          });
+        }
+        const children = [...files.keys()].filter((name) => name.startsWith(`${filePath}/`));
+        if (children.length) {
+          return respond(
+            children.map((name) => ({
               name: name.split('/').pop(),
               path: name,
               sha: 'listed-sha',
               size: files.get(name).length,
               type: 'file',
             }))
-        );
-      }
-
-      if (method === 'GET') {
-        if (!files.has(filePath)) return respond({ message: 'Not Found' }, 404);
-        const content = files.get(filePath);
-        return respond({
-          name: filePath.split('/').pop(),
-          path: filePath,
-          sha: 'read-sha',
-          content: Buffer.from(content, 'utf8').toString('base64'),
-          encoding: 'base64',
-        });
+          );
+        }
+        return respond({ message: 'Not Found' }, 404);
       }
 
       if (method === 'PUT') {
@@ -182,7 +223,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Autosave is debounced by 700 ms; wait past it. */
 const settle = () => sleep(850);
 
-function openDesk({ wide = false, storage = {}, protectMain = false } = {}) {
+function openDesk({ wide = false, storage = {}, protectMain = false, noSettings = false } = {}) {
   const dom = new JSDOM(PAGE_HTML, {
     url: `https://theslowdraft.netlify.app/write/`,
     pretendToBeVisual: true,
@@ -203,7 +244,7 @@ function openDesk({ wide = false, storage = {}, protectMain = false } = {}) {
   });
   window.scrollTo = () => {};
 
-  const github = createGitHub({ protectMain });
+  const github = createGitHub({ protectMain, noSettings });
 
   /* The desk's modules reach for these as globals, exactly as a browser has them.
      Node 22 defines some of them (navigator) as getter-only, so assign by
@@ -228,17 +269,23 @@ function openDesk({ wide = false, storage = {}, protectMain = false } = {}) {
     const element = $(selector);
     return Boolean(element && !element.hidden);
   };
-  const view = () => ['lock', 'library', 'editor', 'done'].find((name) => visible(`[data-view="${name}"]`));
+  const view = () => ['lock', 'library', 'settings', 'editor', 'done'].find((name) => visible(`[data-view="${name}"]`));
   const type = (selector, value) => {
     const element = $(selector);
     element.value = value;
     element.dispatchEvent(new window.Event('input', { bubbles: true }));
   };
+  /** Picks an option in a <select> the way a thumb does. */
+  const selectOption = (selector, value) => {
+    const element = $(selector);
+    element.value = value;
+    element.dispatchEvent(new window.Event('change', { bubbles: true }));
+  };
   const click = (selector) => $(selector).click();
   const submit = (selector) =>
     $(selector).dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 
-  return { window, desk, $, $$, visible, view, type, click, submit, github, settle };
+  return { window, desk, $, $$, visible, view, type, selectOption, click, submit, github, settle };
 }
 
 async function unlock(session, token = TOKEN) {
@@ -580,6 +627,248 @@ async function scenarioSessionOnly() {
   expect(!session.window.localStorage.getItem('slowdraft.desk.token'), 'and not to the device — closing the tab forgets it');
 }
 
+async function scenarioSettingsSave() {
+  console.log('\n  The settings view — one save, one commit');
+  console.log('  ----------------------------------------');
+  const session = openDesk();
+  await unlock(session);
+
+  const deskConfig = JSON.parse(session.desk.dataset.deskConfig);
+  expect(
+    deskConfig.settingsPath === CONFIG.settingsPath && deskConfig.resourcesDir === CONFIG.resourcesDir,
+    'the page embeds where the settings and resources live'
+  );
+
+  session.click('[data-settings]');
+  await sleep(100);
+  expect(session.view() === 'settings', 'Settings opens from the library', session.view());
+  expect(session.$('[data-setting="title"]').value === 'The Slow Draft', 'the site title is loaded from the repository');
+  expect(session.$('[data-setting="tagline"]').value === 'Seeded by the desk session test.', 'and so is the tagline');
+  expect(session.$('[data-setting="hero.kicker"]').value === 'A personal blog', 'keys the saved file does not mention fall back to the defaults');
+  expect(session.$('[data-setting="author.name"]').value === 'Chirag Yadav', 'the about fields are filled');
+  expect(session.$('[data-settings-dirty]').textContent === 'All changes saved', 'a freshly loaded form is clean', session.$('[data-settings-dirty]').textContent);
+
+  session.type('[data-setting="title"]', 'Renamed from the desk');
+  expect(session.$('[data-settings-dirty]').textContent === 'Unsaved changes', 'typing marks the settings unsaved');
+  session.type('[data-setting="hero.heading"]', 'A hero heading written in the desk.');
+
+  /* The email lives in About you and in Newsletter — one setting, two fields. */
+  const emails = session.$$('[data-setting="author.email"]');
+  expect(emails.length === 2, 'the email appears in About you and in Newsletter');
+  emails[0].value = 'chirag@example.com';
+  emails[0].dispatchEvent(new session.window.Event('input', { bubbles: true }));
+  expect(emails[1].value === 'chirag@example.com', 'typing one email updates the other');
+
+  session.click('[data-settings-save]');
+  await sleep(80);
+
+  const puts = session.github.requests.filter(
+    (request) => request.method === 'PUT' && request.path.endsWith(`/contents/${CONFIG.settingsPath}`)
+  );
+  expect(puts.length === 1, 'saving the settings is a single commit', `${puts.length} writes`);
+  expect(puts[0].body.message === 'Update site settings', 'with an honest commit message', puts[0].body.message);
+  expect(puts[0].body.sha === 'read-sha', 'it updates the file it read rather than blindly creating it');
+  expect(puts[0].body.branch === CONFIG.branch, 'on the configured branch');
+
+  const saved = JSON.parse(session.github.files.get(CONFIG.settingsPath));
+  expect(saved.title === 'Renamed from the desk', 'the new title is in the committed JSON');
+  expect(saved.hero.heading === 'A hero heading written in the desk.', 'the new hero heading is in the committed JSON');
+  expect(saved.hero.kicker === 'A personal blog', 'untouched keys survive the save');
+  expect(saved.author.email === 'chirag@example.com', 'the new email is in the committed JSON');
+  expect(Array.isArray(saved.social) && saved.social.length === 4, 'social links are stored as a list');
+  expect(saved.typography.body === 'lora' && saved.typography.size === 'medium', 'typography is stored too');
+  expect(session.$('[data-settings-dirty]').textContent === 'All changes saved', 'after the commit nothing is dirty');
+  expect(/Saved — one commit/.test(session.$('[data-settings-note]').textContent), 'the desk says what it did', session.$('[data-settings-note]').textContent.slice(0, 60));
+  expect(/Committed/.test(session.$('[data-settings-saved]').textContent), 'with the short commit sha');
+
+  /* A broken email never reaches GitHub. */
+  session.type('[data-setting="author.email"]', 'not-an-email');
+  session.click('[data-settings-save]');
+  await sleep(40);
+  const putsAfter = session.github.requests.filter(
+    (request) => request.method === 'PUT' && request.path.endsWith(`/contents/${CONFIG.settingsPath}`)
+  );
+  expect(putsAfter.length === 1, 'an invalid email is refused before it is committed');
+  expect(/does not look like an email/.test(session.$('[data-settings-note]').textContent), 'and the desk says why', session.$('[data-settings-note]').textContent.slice(0, 70));
+
+  session.click('[data-settings-back]');
+  await sleep(60);
+  expect(session.view() === 'library', 'back returns to the library');
+}
+
+async function scenarioAppearance() {
+  console.log('\n  Appearance — a live preview of the site’s type');
+  console.log('  ----------------------------------------------');
+  const session = openDesk();
+  await unlock(session);
+  session.click('[data-settings]');
+  await sleep(100);
+
+  const bodyPreview = session.$('[data-type-body]');
+  const headPreview = session.$('[data-type-heading]');
+  expect(bodyPreview.style.fontFamily.includes('Lora'), 'the preview starts in the saved body face', bodyPreview.style.fontFamily);
+  expect(bodyPreview.style.fontSize === '1.145rem', 'and the saved reading size', bodyPreview.style.fontSize);
+  expect(headPreview.style.fontFamily.includes('Playfair'), 'the heading preview starts in the saved heading face', headPreview.style.fontFamily);
+  expect(headPreview.textContent === 'Seeded hero heading.', 'the preview reads your actual hero text', headPreview.textContent);
+
+  session.type('[data-setting="hero.heading"]', 'Typed live into the preview.');
+  expect(headPreview.textContent === 'Typed live into the preview.', 'the preview heading follows the hero field as you type');
+
+  session.selectOption('[data-setting="typography.body"]', 'inter');
+  expect(bodyPreview.style.fontFamily.includes('Inter'), 'the body preview follows the pick immediately', bodyPreview.style.fontFamily);
+  session.selectOption('[data-setting="typography.heading"]', 'poppins');
+  expect(headPreview.style.fontFamily.includes('Poppins'), 'and so does the heading preview');
+  session.selectOption('[data-setting="typography.size"]', 'large');
+  expect(bodyPreview.style.fontSize === '1.28rem', 'the reading size scales the preview', bodyPreview.style.fontSize);
+
+  session.click('[data-settings-save]');
+  await sleep(60);
+  const saved = JSON.parse(session.github.files.get(CONFIG.settingsPath));
+  expect(
+    saved.typography.body === 'inter' && saved.typography.heading === 'poppins' && saved.typography.size === 'large',
+    'the picks are committed to settings.json',
+    JSON.stringify(saved.typography)
+  );
+  expect(saved.hero.heading === 'Typed live into the preview.', 'and so is the hero heading you watched it render');
+}
+
+async function scenarioSocialLinks() {
+  console.log('\n  Social links — the editable list');
+  console.log('  --------------------------------');
+  const session = openDesk();
+  await unlock(session);
+  session.click('[data-settings]');
+  await sleep(100);
+
+  const rows = () => session.$$('[data-social-list] li');
+  expect(rows().length === 4, 'the four known networks are listed', `${rows().length} rows`);
+  expect(rows()[0].querySelector('[data-social-label]').value === 'X', 'starting with X');
+
+  session.type('[data-social-list] li:nth-child(1) [data-social-url]', 'https://x.com/slowdraft');
+  session.click('[data-social-add="custom"]');
+  expect(rows().length === 5, 'a custom row appears');
+  session.type('[data-social-list] li:nth-child(5) [data-social-label]', 'Mastodon');
+  session.type('[data-social-list] li:nth-child(5) [data-social-url]', 'https://mastodon.social/@slowdraft');
+
+  session.click('[data-social-add="github"]');
+  expect(rows().length === 5, 'adding a network that is already listed does not duplicate it');
+
+  session.click('[data-social-list] li:nth-child(3) [data-social-remove]'); /* GitHub */
+  expect(rows().length === 4, 'a row can be removed');
+
+  session.click('[data-settings-save]');
+  await sleep(60);
+  const saved = JSON.parse(session.github.files.get(CONFIG.settingsPath));
+  expect(saved.social.length === 4, 'the list is committed as edited', `${saved.social.length} links`);
+  expect(saved.social.find((link) => link.id === 'x')?.url === 'https://x.com/slowdraft', 'the X address is in the file');
+  expect(saved.social.some((link) => link.label === 'Mastodon' && link.url === 'https://mastodon.social/@slowdraft'), 'the custom link is in the file');
+  expect(!saved.social.some((link) => link.id === 'github'), 'and the removed network is gone');
+
+  /* A link without https:// is refused before it is committed. */
+  session.type('[data-social-list] li:nth-child(1) [data-social-url]', 'x.com/slowdraft');
+  session.click('[data-settings-save]');
+  await sleep(40);
+  expect(/should start with https/.test(session.$('[data-settings-note]').textContent), 'a bare domain is refused with a fix', session.$('[data-settings-note]').textContent.slice(0, 70));
+}
+
+async function scenarioResources() {
+  console.log('\n  Resources — add, edit, reorder, delete');
+  console.log('  --------------------------------------');
+  const session = openDesk();
+  await unlock(session);
+  session.click('[data-settings]');
+  await sleep(120);
+
+  const cards = () => session.$$('[data-resource-list] .desk-resource-card');
+  expect(cards().length === 2, 'the resources folder is listed', `${cards().length} cards`);
+  expect(session.$('[data-resource-list] li:nth-child(1) [data-res-title]').value === 'Quiet Tools', 'sorted by their order field');
+
+  /* Editing one resource commits just its file. */
+  session.type('[data-resource-list] li:nth-child(1) [data-res-description]', 'Updated from the desk session.');
+  session.click('[data-resource-list] li:nth-child(1) [data-res-save]');
+  await sleep(60);
+  let put = lastPut(session);
+  expect(put.path.endsWith(`/contents/${CONFIG.resourcesDir}/quiet-tools.md`), 'saving a resource commits its own file', put.path);
+  expect(put.body.message === 'Update resource “Quiet Tools”', 'with an honest commit message', put.body.message);
+  expect(Boolean(put.body.sha), 'updating supplies the sha it read');
+  const updated = session.github.files.get('src/content/resources/quiet-tools.md');
+  expect(updated.includes('Updated from the desk session.'), 'the change is in the file');
+  expect(/^order: 0$/m.test(updated), 'order stays a bare number the schema accepts');
+
+  /* Reordering renumbers and commits the files that moved. */
+  session.click('[data-resource-list] li:nth-child(2) [data-res-up]');
+  await sleep(80);
+  expect(session.$('[data-resource-list] li:nth-child(1) [data-res-title]').value === 'Slow Reading', 'the list re-renders in the new order');
+  const quiet = session.github.files.get('src/content/resources/quiet-tools.md');
+  const slow = session.github.files.get('src/content/resources/slow-reading.md');
+  expect(/^order: 1$/m.test(quiet) && /^order: 0$/m.test(slow), 'both files were renumbered in the repository');
+  const reorderPuts = session.github.requests.filter(
+    (request) => request.method === 'PUT' && request.body.message.startsWith('Reorder resources')
+  );
+  expect(reorderPuts.length === 2, 'a swap is two small commits', `${reorderPuts.length} writes`);
+
+  /* Adding lands a new file under its slug. */
+  session.click('[data-resource-add]');
+  await sleep(20);
+  expect(cards().length === 3, 'a new card appears');
+  session.type('[data-resource-list] li:nth-child(3) [data-res-title]', 'Desk Test Resource');
+  session.type('[data-resource-list] li:nth-child(3) [data-res-url]', 'https://example.com/desk-test');
+  session.click('[data-resource-list] li:nth-child(3) [data-res-save]');
+  await sleep(60);
+  put = lastPut(session);
+  expect(put.path.endsWith(`/contents/${CONFIG.resourcesDir}/desk-test-resource.md`), 'the new resource is committed under its slug', put.path);
+  expect(put.body.message === 'Add resource “Desk Test Resource”', 'the commit says it added the resource', put.body.message);
+  expect(!put.body.sha, 'creating supplies no sha');
+  const added = toResourceFields(session.github.files.get('src/content/resources/desk-test-resource.md'));
+  expect(added.order === 2 && added.category === 'General', 'it lands at the end with the default category', JSON.stringify(added));
+
+  /* A resource without a proper link is refused. */
+  session.click('[data-resource-add]');
+  await sleep(20);
+  session.type('[data-resource-list] li:nth-child(4) [data-res-title]', 'No link yet');
+  session.click('[data-resource-list] li:nth-child(4) [data-res-save]');
+  await sleep(30);
+  expect(/Give the resource a link/.test(session.$('[data-settings-note]').textContent), 'a resource without a link is refused', session.$('[data-settings-note]').textContent.slice(0, 60));
+  expect(lastPut(session) === put, 'and nothing was committed');
+
+  /* Deleting asks twice, then removes the file. */
+  session.click('[data-resource-list] li:nth-child(1) [data-res-delete]');
+  expect(!session.$('[data-resource-list] li:nth-child(1) [data-res-confirm]').hidden, 'deleting asks first');
+  session.click('[data-resource-list] li:nth-child(1) [data-res-delete-go]');
+  await sleep(60);
+  const deletion = session.github.requests.find((request) => request.method === 'DELETE');
+  expect(Boolean(deletion) && deletion.path.endsWith(`/contents/${CONFIG.resourcesDir}/slow-reading.md`), 'deleting removes the file from the repository', deletion?.path);
+  expect(!session.github.files.has('src/content/resources/slow-reading.md'), 'the file is gone');
+  expect(cards().length === 3, 'and so is the card'); /* Quiet Tools, Desk Test, the unsaved new one */
+}
+
+async function scenarioSettingsMissing() {
+  console.log('\n  A repository with no settings.json yet');
+  console.log('  --------------------------------------');
+  const session = openDesk({ noSettings: true });
+  await unlock(session);
+  session.click('[data-settings]');
+  await sleep(100);
+
+  expect(session.view() === 'settings', 'the settings view opens even with no settings file', session.view());
+  expect(session.$('[data-setting="title"]').value === SETTINGS_DEFAULTS.title, 'the defaults fill the form');
+  expect(session.$('[data-setting="author.name"]').value === '', 'including the empty author');
+  expect(/No settings file/.test(session.$('[data-settings-note]').textContent), 'the desk explains what it found', session.$('[data-settings-note]').textContent.slice(0, 70));
+
+  session.type('[data-setting="author.name"]', 'Chirag Yadav');
+  session.click('[data-settings-save]');
+  await sleep(60);
+
+  const put = lastPut(session);
+  expect(put.path.endsWith(`/contents/${CONFIG.settingsPath}`), 'saving writes the settings file', put.path);
+  expect(!put.body.sha, 'creating supplies no sha');
+  expect(put.body.message === 'Create site settings', 'the commit says it created the file', put.body.message);
+  const saved = JSON.parse(session.github.files.get(CONFIG.settingsPath));
+  expect(saved.author.name === 'Chirag Yadav', 'the value you typed is in the new file');
+  expect(saved.title === SETTINGS_DEFAULTS.title, 'and the defaults came along with it');
+  expect(/Saved — one commit/.test(session.$('[data-settings-note]').textContent), 'the desk confirms the save');
+}
+
 /* ================================== run =================================== */
 
 (async function run() {
@@ -597,6 +886,11 @@ async function scenarioSessionOnly() {
     scenarioAutosaveAndReturn,
     scenarioWideScreen,
     scenarioSessionOnly,
+    scenarioSettingsSave,
+    scenarioAppearance,
+    scenarioSocialLinks,
+    scenarioResources,
+    scenarioSettingsMissing,
   ];
 
   for (const scenario of scenarios) {
@@ -615,6 +909,6 @@ async function scenarioSessionOnly() {
     process.exit(1);
   }
   console.log(`  ${checks} checks passed across ${scenarios.length} sessions.`);
-  console.log('  Unlock, write, publish, draft, rename, recover — the desk does all of it.\n');
+  console.log('  Unlock, write, publish, draft, rename, recover, restyle, reorder — the desk does all of it.\n');
   process.exit(0);
 })();

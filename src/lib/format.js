@@ -3,6 +3,8 @@
  * reading times and excerpts read identically.
  */
 
+import { normalizeSocial } from './desk/settings.js';
+
 /* Dates are stored as plain YYYY-MM-DD, so they are formatted in UTC to keep
    the same day on every build machine. */
 export function fmtDate(value) {
@@ -92,11 +94,16 @@ export const ICONS = {
 
 /* -------------------------------- site pieces ----------------------------- */
 
+/**
+ * The social row for the footer and the About card: every link the owner kept
+ * in settings (a list of { id, label, url } — the legacy { twitter, github,
+ * linkedin } object is still understood), then Email, then RSS.
+ */
 export function socialItems(site) {
   const items = [];
-  if (site.social?.twitter) items.push({ label: 'X / Twitter', href: site.social.twitter, icon: '' });
-  if (site.social?.github) items.push({ label: 'GitHub', href: site.social.github, icon: '' });
-  if (site.social?.linkedin) items.push({ label: 'LinkedIn', href: site.social.linkedin, icon: '' });
+  for (const link of normalizeSocial(site.social)) {
+    if (link.url) items.push({ label: link.label || 'Link', href: link.url, icon: '' });
+  }
   if (site.author?.email) items.push({ label: 'Email', href: `mailto:${site.author.email}`, icon: ICONS.mail });
   items.push({ label: 'RSS', href: '/rss.xml', icon: ICONS.rss });
   return items;

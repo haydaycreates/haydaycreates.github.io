@@ -7,6 +7,10 @@ import { ICONS, monogram, socialItems, postUrl } from '../lib/format.js';
 const page = await getEntry('pages', 'about');
 const { Content } = await render(page);
 
+/* The heading the owner set in /write/ → Settings wins; the frontmatter of
+   src/content/pages/about.md is the fallback. */
+const heading = site.author.aboutHeading || page.data.heading;
+
 const posts = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 
@@ -20,13 +24,13 @@ const socials = socialItems(site);
 
 <BaseLayout
   title="About"
-  description={page.data.heading || `About ${site.author.name}`}
+  description={heading || `About ${site.author.name}`}
   active="/about/"
 >
   <section class="page-head">
     <div class="wrap">
       <p class="eyebrow">{page.data.eyebrow || 'About'}</p>
-      <h1>{page.data.heading}</h1>
+      <h1>{heading}</h1>
     </div>
   </section>
 

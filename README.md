@@ -38,7 +38,9 @@ Requires **Node 22.12+** (Astro 7's minimum).
 Your editor is a single page in the site itself: **`/write/`**. Open it on your
 phone or laptop, paste a GitHub token once, and write. Pressing **Publish**
 commits the markdown file straight to this repository; your host sees the commit,
-rebuilds, and the post is live about a minute later.
+rebuilds, and the post is live about a minute later. The same page edits the
+site around the posts — **Settings** restyles the masthead, the About card, the
+social links, the typography and the resources list, in one commit.
 
 There is **no server, no database and no CMS behind it** — the page is 30 KB of
 bundled JavaScript that talks only to `api.github.com`, so it works on GitHub
@@ -91,14 +93,16 @@ live there.
 | **Rename** | changing the address moves the file, so a post never appears twice |
 | **Protected `main`** | falls back to committing on a branch and gives you a pull-request link |
 | **Live check** | after publishing it watches for the new page and tells you when it is up |
+| **Settings** | site title, tagline, hero, About you, social links, typography and newsletter — one commit to `src/data/settings.json` |
+| **Resources** | add, edit, reorder and delete the recommended links on `/resources/` |
 
 ### Verification built in
 
 ```bash
-npm run check:desk      # markdown preview, frontmatter round trips, base64, built page
-npm run check:desk:ui   # 9 simulated sessions: unlock, write, publish, draft, rename,
-                        # protected branch, autosave recovery, lock — in a real DOM
-npm run test:desk       # the above, plus a real `astro build` of a desk-written post
+npm run check:desk      # markdown preview, frontmatter and settings round trips, base64, built page
+npm run check:desk:ui   # 14 simulated sessions: unlock, write, publish, draft, rename,
+                        # protected branch, autosave recovery, settings, resources, lock
+npm run test:desk       # the above, plus a real `astro build` of everything the desk can commit
 ```
 
 `check:desk` and `check:desk:ui` both run inside `npm run verify`, so CI fails if
@@ -114,11 +118,12 @@ Netlify Identity and Git Gateway to work.)
 
 ### What the desk writes
 
-| Folder | What it holds | From the desk |
+| Path | What it holds | From the desk |
 |---|---|---|
 | `src/content/blog/*.md` | one file per post | **create, edit, rename, delete** |
-| `public/uploads/*` | cover and inline images | **upload from the camera roll** |
-| `src/content/resources/*.md` | your recommended links | edit in the repository |
+| `src/data/settings.json` | identity, about, social links, appearance, newsletter | **Settings → Save settings (one commit)** |
+| `src/content/resources/*.md` | your recommended links | **add, edit, reorder, delete in Settings** |
+| `public/uploads/*` | cover and inline images, your portrait | **upload from the camera roll** |
 | `src/content/pages/*.md` | the About and Resources copy | edit in the repository |
 
 Every post field the schema validates is in the editor: title, date, updated,
@@ -129,6 +134,34 @@ site — flip the switch to *Published* when it is ready.
 The desk writes the same frontmatter shape as the rest of the folder
 (`title: "…"`, `date: "YYYY-MM-DD"`, `tags: ["a", "b"]`) and it *reads* anything
 the old dashboard left behind, including js-yaml's folded multi-line values.
+
+### Settings — changing the site itself
+
+The **Settings** button at the top of the library opens the owner-editable half
+of the site:
+
+| Section | What it changes |
+|---|---|
+| **Site identity** | title, tagline, and the home page's hero kicker, heading and intro |
+| **About you** | name, role, email, portrait (uploaded to `public/uploads/`), About heading and bio |
+| **Social links** | an editable list — X, Instagram, GitHub, LinkedIn, plus any custom link |
+| **Appearance** | body and heading typeface and the reading size, with a live preview of your hero text |
+| **Newsletter** | heading, blurb, the inbox subscriptions arrive in, and an optional form-service endpoint |
+| **Resources** | the recommended links on `/resources/` — add, edit, reorder and delete |
+
+**Save settings** is one commit: the desk writes `src/data/settings.json`
+through the same Contents-API client that publishes posts, and your host
+rebuilds. At build time `src/site.config.js` merges that file over the defaults
+in `src/lib/desk/settings.js`, so any key you never touch keeps a sensible
+value — and a repository with no settings file at all still builds.
+
+Resources are the exception to the one-commit rule, because each is its own
+markdown file in `src/content/resources/`: every add, edit, reorder and delete
+commits its file as it happens, exactly like a post does.
+
+The technical configuration stays in `src/site.config.js` and out of the desk:
+`postsPerPage`, the `writeLink` button, `writeDesk` (owner, repo, branch and the
+folders it writes to) and the absolute `url`.
 
 ---
 
@@ -179,7 +212,8 @@ writing desk produced, and they work exactly the same here:
 | Typefaces | `f-lora` `f-merriweather` `f-playfair` `f-inter` `f-poppins` `f-jetbrains` `f-serif` `f-sans` `f-mono` |
 
 Site-wide typography (which face the body and headings use, and the reading
-size) lives in `src/site.config.js` under `typography`.
+size) lives in `src/data/settings.json` under `typography` — or pick it with a
+live preview in `/write/` → **Settings** → Appearance.
 
 ---
 
@@ -210,15 +244,19 @@ haydaycreates.github.io/
     │   ├── blog/             one markdown file per post
     │   ├── resources/        one file per recommended link
     │   └── pages/            about.md, resources.md
-    ├── site.config.js        masthead, hero, author, newsletter, typography, writeDesk
+    ├── data/settings.json    masthead, hero, author, social links, newsletter,
+    │                         typography — committed by the desk's Settings view
+    ├── site.config.js        merges settings.json over the defaults; pagination,
+    │                         writeLink, writeDesk, url
     ├── layouts/BaseLayout.astro
     ├── components/           Header, Footer, Newsletter, PostCard
     ├── lib/
     │   ├── fonts.js          the typeface library
     │   ├── format.js         dates, icons, social links
     │   └── desk/             the writing desk — no dependencies, browser and Node
-    │       ├── desk.js           the editor: views, autosave, publish
+    │       ├── desk.js           the editor: views, autosave, publish, settings
     │       ├── github.js         GitHub's Contents API, token storage, error text
+    │       ├── settings.js       site settings: defaults, merge, resources files
     │       ├── markdown.js       the live preview renderer
     │       └── frontmatter.js    reading and writing the top of a post
     └── pages/
@@ -247,7 +285,7 @@ npm run migrate -- --force           # overwrite files that already exist
 ```
 
 It writes posts, resources and both prose pages, and refreshes
-`src/site.config.js`. Existing files are kept unless you pass `--force`, so
+`src/data/settings.json`. Existing files are kept unless you pass `--force`, so
 local edits are safe.
 
 **Or skip the old app entirely** — a markdown file in `src/content/blog/` is all a
@@ -257,20 +295,23 @@ post ever needed.
 
 ## The newsletter form
 
-A static site has no server to collect addresses, so `src/site.config.js` offers
-two honest options:
+A static site has no server to collect addresses, so the newsletter setting —
+edited in `/write/` → **Settings** → Newsletter and stored in
+`src/data/settings.json` — offers two honest options:
 
-```js
-newsletter: {
-  heading: 'Letters, occasionally',
-  blurb: '…',
-  endpoint: '',        // ← paste a form service URL here
-  mode: 'mailto',
+```json
+"newsletter": {
+  "heading": "Letters, occasionally",
+  "blurb": "…",
+  "endpoint": "",
+  "mode": "mailto"
 }
 ```
 
 - **Leave `endpoint` empty** (the default): the form hands the address to your
-  inbox through the visitor's own mail app. No third party, works immediately.
+  inbox through the visitor's own mail app — a pre-addressed “please add me”
+  email to the address in **About you → Email**. No third party, works
+  immediately.
 - **Set `endpoint`** to a form service — Buttondown, Formspree, Mailchimp,
   ConvertKit — and the form POSTs `{"email": "…"}` there instead, showing
   "Subscribing…" and a thank-you note.

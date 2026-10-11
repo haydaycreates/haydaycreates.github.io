@@ -1,0 +1,51 @@
+{
+  "title": "The Slow Draft",
+  "tagline": "Essays on writing, building things, and paying attention.",
+  "hero": {
+    "kicker": "A personal blog",
+    "heading": "Notes from the slow lane of the internet.",
+    "intro": "Long-ish thoughts on writing, craft, and the small systems that keep a creative life running. New pieces land here every couple of weeks — you can also get them by email."
+  },
+  "author": {
+    "name": "Chirag Yadav",
+    "role": "Student · Active reader",
+    "email": "hello@example.com",
+    "photo": "",
+    "aboutHeading": "",
+    "shortBio": "I'm Chirag — a student, and an active reader. This site is where I keep what I'm learning: notes from the books I'm reading, essays about writing and attention, and the occasional thing I build while I'm figuring things"
+  },
+  "social": [
+    {
+      "id": "x",
+      "label": "X",
+      "url": ""
+    },
+    {
+      "id": "instagram",
+      "label": "Instagram",
+      "url": ""
+    },
+    {
+      "id": "github",
+      "label": "GitHub",
+      "url": ""
+    },
+    {
+      "id": "linkedin",
+      "label": "LinkedIn",
+      "url": ""
+    }
+  ],
+  "newsletter": {
+    "heading": "Letters, occasionally",
+    "blurb": "One short email when something new goes up. No spam, no selling your address, unsubscribe in one click.",
+    "endpoint": "",
+    "mode": "mailto"
+  },
+  "footerNote": "Written by hand, published from a small editor.",
+  "typography": {
+    "body": "lora",
+    "heading": "playfair",
+    "size": "medium"
+  }
+}
