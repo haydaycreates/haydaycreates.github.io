@@ -1,13 +1,13 @@
-# Netlify build settings for the Astro static site.
+# Netlify build settings — kept only while the old Netlify deploy is still
+# live. The site's home is GitHub Pages (see DEPLOYMENT.md); once you have
+# stopped builds in the Netlify dashboard ("Stop Netlify builds" below), this
+# file can be deleted.
 #
-# This file covers the build. The two things Decap CMS needs — Identity and
-# Git Gateway — are switches in the Netlify UI, not settings in a file:
+#   Netlify dashboard → your site → Site configuration → Build & deploy →
+#   Continuous builds → Stop builds
 #
-#   Site configuration → Identity            → Enable Identity
-#   Identity → Registration                  → "Invite only"
-#   Identity → Services → Git Gateway        → Enable
-#
-# The full walkthrough is in README.md → "Writing from the browser".
+# Stopping matters: while builds are on, every merge to main also runs a
+# Netlify production deploy, and production deploys cost credits.
 
 [build]
   command = "npm run build"
@@ -27,9 +27,16 @@
   #
   # SITE_URL = "https://yourdomain.com"
 
-# The dashboard should never show up in a search engine.
+# The private writing desk at /write/ stays out of search results. Both the
+# bare path and anything under it, so the header applies whichever way the host
+# resolves the directory index.
 [[headers]]
-  for = "/admin/*"
+  for = "/write"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/write/*"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
 

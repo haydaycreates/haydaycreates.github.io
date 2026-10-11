@@ -205,15 +205,11 @@ export const site = {
   postsPerPage: 9,
 
   /**
-   * The nav's "Write" button. The static site has no admin panel, so leave this
-   * empty to hide it, or point it at your editor — for example the GitHub
-   * new-file page for this repo:
-   *   https://github.com/<you>/<repo>/new/main/src/content/blog
+   * The nav's "Write" button. It points at the private writing desk at /write/,
+   * which commits markdown to the repository using a GitHub token kept in your
+   * own browser. Set it to '' to hide the button entirely.
    */
-  adminLink: '/admin/',
-
-  /* Load the Netlify Identity widget site-wide, for invitation emails. */
-  identityWidget: false,
+  writeLink: '/write/',
 
   /* Absolute URL used in RSS, the sitemap and canonical tags.
      SITE_URL=https://yourdomain.com npm run build overrides this. */

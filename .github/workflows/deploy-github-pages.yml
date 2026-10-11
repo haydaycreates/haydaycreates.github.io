@@ -1,11 +1,16 @@
-# Deploy to GitHub Pages — only after you opt in (DEPLOYMENT.md, Step E).
+# Deploy to GitHub Pages — the site's production home.
 #
-# Stays skipped until you add the repository variable DEPLOY_TO_PAGES = "true"
+# Every merge to main rebuilds the site and publishes it here. GitHub Pages
+# deploys are free and unlimited for a public repository, so each publish
+# costs nothing.
+#
+# Stays skipped until the repository variable DEPLOY_TO_PAGES = "true" exists
 # (Settings → Secrets and variables → Actions → Variables). That keeps runs
-# quiet until Pages is actually enabled on the repo.
+# quiet until Pages is actually switched on for the repo.
 #
-# Requires the repo to be served at a root address: either it is named
-# <your-username>.github.io, or it has a custom domain configured on Pages.
+# The repo is named <username>.github.io, so Pages serves it at the clean root
+# address https://<username>.github.io/ — the site-url step below handles both
+# that case and a project-site subpath, should the name ever change.
 
 name: Deploy to GitHub Pages
 
@@ -33,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify CMS config, build, audit links
+      - name: Build and verify the writing desk and links
         run: npm run verify
 
       - name: Compute the site address

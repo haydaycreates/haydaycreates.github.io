@@ -1,0 +1,648 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { site } from '../site.config.js';
+
+/**
+ * /write/ — the private writing desk.
+ *
+ * Deliberately not in the sitemap and marked noindex. The "Write" link in the
+ * header brings you here; anyone without your GitHub token sees the lock screen
+ * and can neither read nor change a single file.
+ *
+ * All the behaviour lives in src/lib/desk/ and is bundled by Astro — the page
+ * ships no framework and makes no calls anywhere except api.github.com.
+ */
+const desk = {
+  owner: site.writeDesk.owner,
+  repo: site.writeDesk.repo,
+  branch: site.writeDesk.branch,
+  postsDir: site.writeDesk.postsDir,
+  mediaDir: site.writeDesk.mediaDir,
+};
+
+const newTokenUrl = 'https://github.com/settings/personal-access-tokens/new';
+
+const TOOLS = [
+  { tool: 'bold', label: 'B', title: 'Bold — **words**', class: 'is-bold' },
+  { tool: 'italic', label: 'I', title: 'Italic — *words*', class: 'is-italic' },
+  { tool: 'heading', label: 'H2', title: 'Section heading' },
+  { tool: 'quote', label: '❝', title: 'Quotation' },
+  { tool: 'list', label: '•', title: 'List item' },
+  { tool: 'link', label: '🔗', title: 'Link' },
+];
+
+/* The pen menu — the same nine pens, six highlighters and nine typefaces the
+   site's stylesheet already defines, so what you pick here is what readers get.
+   See /blog/the-pen-menu-and-how-to-use-it/. */
+const PENS = [
+  { name: 'c-ink', label: 'Ink' },
+  { name: 'c-terracotta', label: 'Terracotta' },
+  { name: 'c-blue', label: 'Blue' },
+  { name: 'c-green', label: 'Green' },
+  { name: 'c-plum', label: 'Plum' },
+  { name: 'c-amber', label: 'Amber' },
+  { name: 'c-crimson', label: 'Crimson' },
+  { name: 'c-indigo', label: 'Indigo' },
+  { name: 'c-teal', label: 'Teal' },
+];
+
+const HIGHLIGHTS = [
+  { name: 'hl-yellow', label: 'Yellow' },
+  { name: 'hl-mint', label: 'Mint' },
+  { name: 'hl-sky', label: 'Sky' },
+  { name: 'hl-rose', label: 'Rose' },
+  { name: 'hl-lavender', label: 'Lavender' },
+  { name: 'hl-peach', label: 'Peach' },
+];
+
+const FACES = [
+  { name: 'f-lora', label: 'Lora' },
+  { name: 'f-merriweather', label: 'Merriweather' },
+  { name: 'f-playfair', label: 'Playfair' },
+  { name: 'f-inter', label: 'Inter' },
+  { name: 'f-poppins', label: 'Poppins' },
+  { name: 'f-jetbrains', label: 'JetBrains' },
+  { name: 'f-serif', label: 'Serif' },
+  { name: 'f-sans', label: 'Sans' },
+  { name: 'f-mono', label: 'Mono' },
+];
+---
+
+<BaseLayout
+  title="Write"
+  description="The private writing desk."
+  bodyClass="is-desk"
+  bare
+>
+  <Fragment slot="head">
+    <meta name="robots" content="noindex, nofollow" />
+  </Fragment>
+
+  <div class="desk" id="desk" data-desk-config={JSON.stringify(desk)}>
+    <!-- ============================ 1 · locked ============================ -->
+    <!-- Shown by default: if the bundle ever fails to load, a visitor still sees
+         a lock screen rather than a blank page. The desk hides it on unlock. -->
+    <section class="desk-view desk-lock-view" data-view="lock">
+      <div class="desk-lock">
+        <p class="eyebrow">Private · <span data-repo-label>{desk.owner}/{desk.repo}</span></p>
+        <h1>The writing desk</h1>
+        <p class="desk-lede">
+          This page writes markdown straight into your repository, and your host rebuilds the site
+          from that commit. It works with <strong>your GitHub token alone</strong> — there is no
+          server behind it, and a visitor who finds this page sees only this screen.
+        </p>
+
+        <form class="desk-lock-form" data-lock-form autocomplete="off">
+          <label class="desk-label" for="desk-token">GitHub token</label>
+          <div class="desk-token-row">
+            <input
+              id="desk-token"
+              class="desk-input desk-token"
+              type="password"
+              inputmode="text"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              placeholder="github_pat_…"
+              data-token-input
+            />
+            <button class="btn btn-ghost btn-sm" type="button" data-token-toggle>Show</button>
+          </div>
+
+          <fieldset class="desk-remember">
+            <legend class="sr-only">How long to keep the token on this device</legend>
+            <label>
+              <input type="radio" name="remember" value="device" checked />
+              <span>Keep on this device</span>
+            </label>
+            <label>
+              <input type="radio" name="remember" value="session" />
+              <span>This session only</span>
+            </label>
+          </fieldset>
+
+          <button class="btn btn-accent desk-cta" type="submit" data-lock-submit>Unlock the desk</button>
+          <p class="desk-note" data-lock-note role="status" aria-live="polite"></p>
+        </form>
+
+        <details class="desk-help">
+          <summary>How to make the token — two minutes, once</summary>
+          <ol>
+            <li>
+              Open <a href={newTokenUrl} target="_blank" rel="noopener">GitHub → Settings → Developer settings →
+              Fine-grained tokens → Generate new token</a>.
+            </li>
+            <li>Name it <em>Slow Draft desk</em> and pick an expiry you can live with.</li>
+            <li>
+              <strong>Resource owner:</strong> your own account.<br />
+              <strong>Repository access:</strong> “Only select repositories” → <code>{desk.owner}/{desk.repo}</code>.
+            </li>
+            <li>
+              <strong>Permissions → Repository permissions → Contents:</strong> <code>Read and write</code>.
+              Nothing else is needed.
+            </li>
+            <li>Generate it, copy the string that starts <code>github_pat_</code>, and paste it above.</li>
+          </ol>
+          <p class="desk-help-note">
+            The token is stored in this browser only (and never in the repository, the build or a
+            cookie). “Lock” in the top bar removes it again. If your phone is shared, choose
+            <em>This session only</em>.
+          </p>
+          <p class="desk-help-note">
+            A classic token with the <code>repo</code> scope also works, but it reaches every
+            repository you own — the fine-grained one is the safer key.
+          </p>
+        </details>
+      </div>
+    </section>
+
+    <!-- =========================== 2 · library ============================ -->
+    <section class="desk-view" data-view="library" hidden>
+      <div class="desk-bar">
+        <div>
+          <p class="eyebrow">Your writing</p>
+          <h1 class="desk-h1">Library</h1>
+          <p class="desk-sub">
+            <span data-signed-in></span>
+            <span class="desk-counts" data-counts></span>
+          </p>
+        </div>
+        <div class="desk-bar-actions">
+          <button class="btn btn-accent" type="button" data-new>New post</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lock-now>Lock</button>
+        </div>
+      </div>
+
+      <button class="desk-resume" type="button" data-resume hidden>
+        <span class="desk-resume-label">Continue where you left off</span>
+        <span class="desk-resume-title" data-resume-title></span>
+        <span class="desk-resume-meta" data-resume-meta></span>
+      </button>
+
+      <div class="desk-filters">
+        <button class="desk-filter is-on" type="button" data-filter="all">All</button>
+        <button class="desk-filter" type="button" data-filter="live">Published</button>
+        <button class="desk-filter" type="button" data-filter="draft">Drafts</button>
+      </div>
+
+      <p class="desk-note" data-list-note role="status" aria-live="polite"></p>
+
+      <ul class="desk-list" data-list></ul>
+
+      <div class="desk-empty" data-list-empty hidden>
+        <h2>Nothing here yet</h2>
+        <p data-list-empty-text></p>
+      </div>
+    </section>
+
+    <!-- =========================== 3 · editor ============================= -->
+    <section class="desk-view desk-editor-view" data-view="editor" hidden>
+      <div class="desk-editor-bar">
+        <button class="btn btn-ghost btn-sm" type="button" data-back>← Library</button>
+        <span class="desk-state" data-state>New post</span>
+        <div class="desk-tabs" role="group" aria-label="Editor pane">
+          <button class="desk-tab is-on" type="button" data-pane="write" aria-pressed="true">Write</button>
+          <button class="desk-tab" type="button" data-pane="preview" aria-pressed="false">Preview</button>
+        </div>
+      </div>
+
+      <div class="desk-editor" data-editor>
+        <!-- write pane -->
+        <div class="desk-pane" data-pane-view="write">
+          <input
+            class="desk-title-input"
+            type="text"
+            placeholder="Title"
+            aria-label="Title"
+            autocomplete="off"
+            data-field="title"
+          />
+
+          <p class="desk-url">
+            <span class="desk-url-label">Address</span>
+            <code data-url-hint>/blog/…</code>
+          </p>
+
+          <div class="desk-toolbar" role="group" aria-label="Formatting">
+            {TOOLS.map((item) => (
+              <button
+                class={`desk-tool ${item.class || ''}`}
+                type="button"
+                title={item.title}
+                aria-label={item.title}
+                data-tool={item.tool}
+              >{item.label}</button>
+            ))}
+            <button
+              class="desk-tool is-pens"
+              type="button"
+              data-pens-toggle
+              aria-expanded="false"
+              aria-controls="desk-pens"
+              title="Pens, highlighters and typefaces"
+            >✎ Pens</button>
+            <button class="desk-tool" type="button" data-upload="body" title="Upload a photo and drop it here" aria-label="Upload an image into the text">🖼</button>
+          </div>
+
+          <div class="desk-pens" id="desk-pens" data-pens hidden>
+            <div class="desk-pens-group">
+              <p class="desk-pens-label">Nine pens</p>
+              <div class="desk-pens-row">
+                {PENS.map((pen) => (
+                  <button class="desk-swatch" type="button" data-pen={pen.name} title={pen.label}>
+                    <span class={`desk-swatch-sample ${pen.name}`}>Aa</span>
+                    <small>{pen.label}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div class="desk-pens-group">
+              <p class="desk-pens-label">Six highlighters</p>
+              <div class="desk-pens-row">
+                {HIGHLIGHTS.map((hl) => (
+                  <button class="desk-swatch" type="button" data-mark={hl.name} title={hl.label}>
+                    <span class={`desk-swatch-sample ${hl.name}`}>Aa</span>
+                    <small>{hl.label}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div class="desk-pens-group">
+              <p class="desk-pens-label">Nine typefaces</p>
+              <div class="desk-pens-row">
+                {FACES.map((face) => (
+                  <button class="desk-swatch" type="button" data-font={face.name} title={face.label}>
+                    <span class={`desk-swatch-sample ${face.name}`}>Aa</span>
+                    <small>{face.label}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p class="desk-pens-hint">Select some words first, then tap a swatch. It wraps them in the same HTML the site already styles.</p>
+          </div>
+
+          <textarea
+            class="desk-body"
+            placeholder="Start writing. Markdown, or plain sentences — both are fine."
+            aria-label="Body"
+            spellcheck="true"
+            data-field="body"
+          ></textarea>
+
+          <div class="desk-panel">
+            <button class="desk-panel-toggle" type="button" data-details-toggle aria-expanded="false" aria-controls="desk-details">
+              Post settings
+            </button>
+            <div class="desk-fields" id="desk-details" data-details hidden>
+              <label class="desk-field">
+                <span class="desk-label">Address (slug)</span>
+                <input class="desk-input" type="text" autocomplete="off" spellcheck="false" data-field="slug" />
+                <span class="desk-hint" data-slug-note></span>
+              </label>
+
+              <label class="desk-field">
+                <span class="desk-label">Publish date</span>
+                <input class="desk-input" type="date" data-field="date" />
+                <span class="desk-hint">Backdate it to import older writing.</span>
+              </label>
+
+              <label class="desk-field">
+                <span class="desk-label">Summary</span>
+                <textarea class="desk-input desk-area-sm" rows="2" data-field="summary" placeholder="One or two sentences for the cards, search results and the RSS feed."></textarea>
+              </label>
+
+              <label class="desk-field">
+                <span class="desk-label">Tags</span>
+                <input class="desk-input" type="text" autocomplete="off" data-field="tags" placeholder="writing, reading" />
+                <span class="desk-hint">Comma separated. Each tag gets a page at /blog/tag/…</span>
+              </label>
+
+              <div class="desk-field">
+                <span class="desk-label">Cover image</span>
+                <div class="desk-cover-row">
+                  <input class="desk-input" type="text" autocomplete="off" spellcheck="false" data-field="cover" placeholder="/uploads/… or a full URL" />
+                  <button class="btn btn-ghost btn-sm" type="button" data-upload="cover">Upload</button>
+                </div>
+              </div>
+
+              <label class="desk-switch">
+                <input type="checkbox" data-field="featured" />
+                <span>
+                  <strong>Feature on the home page</strong>
+                  <small>The big story at the top.</small>
+                </span>
+              </label>
+
+              <div class="desk-danger">
+                <button class="btn btn-danger btn-sm" type="button" data-delete>Delete this post</button>
+                <div class="desk-danger-confirm" data-delete-confirm hidden>
+                  <p>Delete <strong>permanently</strong> from the repository? It disappears from the site on the next rebuild.</p>
+                  <div class="desk-danger-actions">
+                    <button class="btn btn-danger btn-sm" type="button" data-delete-go>Yes, delete</button>
+                    <button class="btn btn-ghost btn-sm" type="button" data-delete-cancel>Keep it</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- preview pane -->
+        <div class="desk-pane" data-pane-view="preview" hidden>
+          <article class="desk-preview-card">
+            <header>
+              <h2 class="desk-preview-title" data-preview-title>Untitled</h2>
+              <p class="desk-preview-meta" data-preview-meta></p>
+            </header>
+            <div class="prose desk-preview" data-preview></div>
+            <p class="desk-preview-note">
+              This is how the page will read. Your site renders the published version itself, so
+              spacing may differ by a hair.
+            </p>
+          </article>
+        </div>
+      </div>
+
+      <div class="desk-actions">
+        <div class="desk-mode" role="group" aria-label="Publish state">
+          <button class="desk-mode-btn is-on" type="button" data-mode="draft" aria-pressed="true">Draft</button>
+          <button class="desk-mode-btn" type="button" data-mode="live" aria-pressed="false">Published</button>
+        </div>
+        <div class="desk-actions-right">
+          <span class="desk-count" data-count>0 words</span>
+          <span class="desk-autosave" data-autosave></span>
+          <button class="btn btn-ghost" type="button" data-save-draft hidden>Save draft</button>
+          <button class="btn btn-accent" type="button" data-publish>Publish now</button>
+        </div>
+      </div>
+
+      <p class="desk-notice" data-notice role="status" aria-live="polite" hidden></p>
+
+      <div class="desk-fallback" data-fallback hidden>
+        <p data-fallback-text></p>
+        <div class="desk-fallback-actions">
+          <button class="btn btn-solid btn-sm" type="button" data-fallback-go>Commit to a branch</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-fallback-cancel>Not now</button>
+        </div>
+      </div>
+
+      <input class="sr-only" type="file" accept="image/*" data-file-input tabindex="-1" aria-hidden="true" />
+    </section>
+
+    <!-- ============================ 4 · done ============================== -->
+    <section class="desk-view" data-view="done" hidden>
+      <div class="desk-done">
+        <p class="eyebrow">Committed</p>
+        <h1 class="desk-h1" data-done-title></h1>
+        <p class="desk-done-status" data-done-status></p>
+
+        <dl class="desk-done-facts">
+          <div>
+            <dt>Commit</dt>
+            <dd><code data-done-sha></code> <a data-done-commit href="#" target="_blank" rel="noopener">view on GitHub ↗</a></dd>
+          </div>
+          <div data-done-compare-row hidden>
+            <dt>Review</dt>
+            <dd><a data-done-compare href="#" target="_blank" rel="noopener">Open a pull request</a></dd>
+          </div>
+        </dl>
+
+        <div class="desk-done-actions">
+          <a class="btn btn-solid" data-done-post href="#" target="_blank" rel="noopener">Open the post ↗</a>
+          <button class="btn btn-accent" type="button" data-done-again>Write another</button>
+          <button class="btn btn-ghost" type="button" data-done-library>Back to library</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    import { mountDesk } from '../lib/desk/desk.js';
+    mountDesk(document.getElementById('desk'));
+  </script>
+</BaseLayout>
+
+<style is:global>
+  /* ---------------------------------------------------------------- layout */
+  body.is-desk main { padding-bottom: 0; }
+  .desk { --desk-bar-h: 56px; padding-bottom: 96px; }
+  .desk-view { max-width: 1120px; margin: 0 auto; padding: 26px 18px 40px; }
+  .desk-h1 { font-size: clamp(1.7rem, 4.4vw, 2.4rem); margin: 0 0 .2em; }
+  .desk-sub { color: var(--muted); font-size: .88rem; margin: 0; display: flex; flex-wrap: wrap; gap: .5em; align-items: baseline; }
+  .desk-note { color: var(--ink-soft); font-size: .92rem; margin: .8em 0 0; min-height: 1.2em; }
+  .desk-note.is-error { color: #9a3520; }
+  .desk-note.is-good { color: var(--good); }
+
+  /* ------------------------------------------------------------------ lock */
+  .desk-lock-view { padding-top: 8vh; }
+  .desk-lock { max-width: 620px; margin: 0 auto; }
+  .desk-lock h1 { font-size: clamp(2rem, 6vw, 2.9rem); margin-bottom: .35em; }
+  .desk-lede { color: var(--ink-soft); font-size: 1.02rem; max-width: 56ch; }
+  .desk-lock-form {
+    margin-top: 26px; padding: 20px; background: var(--card);
+    border: 1px solid var(--rule); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  }
+  .desk-label { display: block; font-size: .78rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .45em; font-weight: 600; }
+  .desk-token-row { display: flex; gap: 8px; }
+  .desk-input {
+    width: 100%; font: inherit; color: var(--ink); background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 10px; padding: .7em .8em;
+  }
+  .desk-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  .desk-token { font-family: var(--mono); font-size: .92rem; letter-spacing: .02em; }
+  .desk-remember { border: 0; padding: 14px 0 0; margin: 0; display: flex; flex-wrap: wrap; gap: 14px; }
+  .desk-remember label { display: inline-flex; align-items: center; gap: .5em; font-size: .9rem; color: var(--ink-soft); }
+  .desk-remember input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .desk-cta { width: 100%; justify-content: center; padding: .95em 1.2em; font-size: 1rem; margin-top: 6px; }
+  .desk-help { margin-top: 22px; border-top: 1px solid var(--rule-soft); padding-top: 14px; }
+  .desk-help summary { cursor: pointer; font-weight: 600; color: var(--accent-ink); padding: .3em 0; }
+  .desk-help ol { padding-left: 1.2em; color: var(--ink-soft); font-size: .95rem; }
+  .desk-help li { margin: .55em 0; }
+  .desk-help code { font-family: var(--mono); font-size: .85em; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 5px; padding: .05em .35em; }
+  .desk-help-note { font-size: .88rem; color: var(--muted); }
+
+  /* --------------------------------------------------------------- library */
+  .desk-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid var(--rule-soft); }
+  .desk-bar-actions { display: flex; gap: 8px; align-items: center; }
+  .desk-counts { color: var(--muted); }
+  .desk-filters { display: flex; gap: 8px; margin: 18px 0 6px; flex-wrap: wrap; }
+  .desk-filter {
+    font: inherit; font-size: .88rem; padding: .5em 1em; border-radius: 999px; cursor: pointer;
+    background: transparent; border: 1px solid var(--rule); color: var(--ink-soft); min-height: 44px;
+  }
+  .desk-filter.is-on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+
+  .desk-resume {
+    display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+    margin-top: 14px; padding: 14px 16px; border-radius: var(--radius);
+    background: var(--accent-soft); border: 1px solid #e6c9bb; color: var(--ink);
+  }
+  .desk-resume-label { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; color: var(--accent-ink); font-weight: 700; }
+  .desk-resume-title { display: block; font-family: var(--head-font); font-size: 1.14rem; margin: .2em 0; }
+  .desk-resume-meta { display: block; font-size: .82rem; color: var(--muted); }
+
+  .desk-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+  .desk-item {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    background: var(--card); border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 12px 14px;
+  }
+  .desk-item .chip { margin-left: 0; }
+  .desk-item-open {
+    font: inherit; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; color: inherit;
+    min-width: 0; min-height: 44px; display: grid; gap: 2px;
+  }
+  .desk-item-title { font-family: var(--head-font); font-size: 1.06rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk-item-open:hover .desk-item-title { color: var(--accent-ink); }
+  .desk-item-meta { font-size: .8rem; color: var(--muted); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk-item-view { font-size: .82rem; padding: .5em .7em; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-soft); min-height: 40px; display: inline-flex; align-items: center; }
+  .desk-item-view:hover { text-decoration: none; background: var(--paper-2); }
+
+  .desk-empty { margin-top: 34px; padding: 30px 22px; text-align: center; border: 1px dashed var(--rule); border-radius: var(--radius); background: var(--card); }
+  .desk-empty h2 { font-size: 1.3rem; }
+  .desk-empty p { color: var(--muted); margin: 0; }
+
+  /* ---------------------------------------------------------------- editor */
+  .desk-editor-view { padding-bottom: 20px; }
+  .desk-editor-bar {
+    position: sticky; top: 68px; z-index: 20; display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; margin-bottom: 8px; background: rgba(251, 246, 236, .94); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .desk-state { font-size: .82rem; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk-tabs { display: flex; gap: 4px; background: var(--paper-2); border-radius: 999px; padding: 3px; }
+  .desk-tab {
+    font: inherit; font-size: .85rem; border: 0; background: transparent; color: var(--ink-soft);
+    padding: .5em .95em; border-radius: 999px; cursor: pointer; min-height: 38px;
+  }
+  .desk-tab.is-on { background: var(--card); color: var(--ink); box-shadow: var(--shadow-sm); font-weight: 600; }
+
+  .desk-editor { display: grid; gap: 22px; }
+  .desk-title-input {
+    width: 100%; font-family: var(--head-font); font-size: clamp(1.5rem, 5.4vw, 2.2rem); font-weight: 600;
+    line-height: 1.2; letter-spacing: -.015em; color: var(--ink); background: transparent; border: 0;
+    border-bottom: 1px solid var(--rule); padding: .25em 0 .35em; margin-bottom: .5em;
+  }
+  .desk-title-input:focus { outline: none; border-bottom-color: var(--accent); }
+  .desk-url { display: flex; align-items: baseline; gap: .6em; margin: 0 0 14px; font-size: .82rem; color: var(--muted); }
+  .desk-url-label { text-transform: uppercase; letter-spacing: .1em; font-size: .7rem; font-weight: 700; }
+  .desk-url code { font-family: var(--mono); color: var(--ink-soft); }
+
+  .desk-toolbar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 10px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .desk-toolbar::-webkit-scrollbar { display: none; }
+  .desk-tool {
+    flex: none; min-width: 44px; min-height: 44px; font: inherit; font-size: .95rem; cursor: pointer;
+    background: var(--card); border: 1px solid var(--rule); border-radius: 10px; color: var(--ink-soft);
+    display: inline-flex; align-items: center; justify-content: center; padding: 0 .55em;
+  }
+  .desk-tool:active { background: var(--paper-2); transform: translateY(1px); }
+  .desk-tool.is-bold { font-weight: 800; }
+  .desk-tool.is-italic { font-style: italic; font-family: var(--serif); }
+  .desk-tool.is-pens { font-size: .84rem; font-weight: 600; color: var(--accent-ink); border-color: #e6c9bb; background: var(--accent-soft); }
+
+  /* the pen menu */
+  .desk-pens {
+    margin: 0 0 12px; padding: 14px; background: var(--card);
+    border: 1px solid var(--rule); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  }
+  .desk-pens-group + .desk-pens-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule-soft); }
+  .desk-pens-label { margin: 0 0 .5em; font-size: .7rem; text-transform: uppercase; letter-spacing: .12em; font-weight: 700; color: var(--muted); }
+  .desk-pens-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .desk-swatch {
+    flex: none; width: 74px; min-height: 62px; cursor: pointer; font: inherit;
+    display: grid; gap: 2px; justify-items: center; align-content: center;
+    background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: 6px 4px;
+  }
+  .desk-swatch:active { transform: translateY(1px); background: var(--paper-2); }
+  .desk-swatch-sample { font-size: 1.15rem; line-height: 1.2; color: var(--ink); }
+  .desk-swatch small { font-size: .66rem; color: var(--muted); line-height: 1.15; text-align: center; }
+  .desk-pens-hint { margin: 12px 0 0; font-size: .8rem; color: var(--muted); }
+
+  .desk-body {
+    width: 100%; min-height: 58vh; font-family: var(--prose-font); font-size: 1.08rem; line-height: 1.75;
+    color: #322b24; background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 18px 16px; resize: vertical;
+  }
+  .desk-body:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .desk-panel { margin-top: 16px; border-top: 1px solid var(--rule-soft); padding-top: 14px; }
+  .desk-panel-toggle { font: inherit; font-weight: 600; color: var(--accent-ink); background: none; border: 0; cursor: pointer; padding: .4em 0; min-height: 44px; }
+  .desk-fields { display: grid; gap: 16px; margin-top: 10px; }
+  .desk-field { display: block; }
+  .desk-hint { display: block; font-size: .8rem; color: var(--muted); margin-top: .35em; }
+  .desk-hint.is-warn { color: #8a6320; }
+  .desk-area-sm { resize: vertical; min-height: 2.6em; font-family: var(--sans); font-size: .95rem; }
+  .desk-cover-row { display: flex; gap: 8px; align-items: center; }
+  .desk-cover-row .desk-input { font-family: var(--mono); font-size: .85rem; }
+  .desk-switch { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; background: var(--paper-2); border-radius: 12px; }
+  .desk-switch input { width: 22px; height: 22px; margin-top: 2px; accent-color: var(--accent); flex: none; }
+  .desk-switch strong { display: block; font-size: .95rem; }
+  .desk-switch small { display: block; color: var(--muted); font-size: .82rem; }
+  .desk-danger { border-top: 1px dashed var(--rule); padding-top: 14px; }
+  .desk-danger-confirm p { font-size: .9rem; color: var(--ink-soft); }
+  .desk-danger-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* preview */
+  .desk-preview-card { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 22px 18px; }
+  .desk-preview-title { font-size: clamp(1.6rem, 5vw, 2.2rem); margin-bottom: .2em; }
+  .desk-preview-meta { font-size: .82rem; color: var(--muted); margin: 0 0 1.4em; padding-bottom: 1em; border-bottom: 1px solid var(--rule-soft); }
+  .desk-preview { max-width: 68ch; }
+  .desk-preview:empty::before { content: 'Nothing to preview yet.'; color: var(--muted); }
+  .desk-preview-note { margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--rule-soft); font-size: .8rem; color: var(--muted); }
+
+  /* action bar */
+  .desk-actions {
+    position: sticky; bottom: 0; z-index: 25; margin: 18px -18px -20px; padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+    display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    background: rgba(251, 246, 236, .96); backdrop-filter: blur(8px); border-top: 1px solid var(--rule);
+  }
+  .desk-mode { display: flex; gap: 4px; background: var(--paper-2); border-radius: 999px; padding: 3px; }
+  .desk-mode-btn {
+    font: inherit; font-size: .85rem; border: 0; background: transparent; color: var(--ink-soft);
+    padding: .55em 1em; border-radius: 999px; cursor: pointer; min-height: 42px;
+  }
+  .desk-mode-btn.is-on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm); }
+  .desk-actions-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .desk-count, .desk-autosave { font-size: .78rem; color: var(--muted); }
+  .desk-actions .btn { min-height: 46px; }
+
+  .desk-notice {
+    margin-top: 14px; padding: 12px 14px; border-radius: 12px; font-size: .92rem;
+    background: var(--good-soft); color: var(--good); border: 1px solid #cfe0d2;
+  }
+  .desk-notice.is-error { background: #fbeee9; color: #9a3520; border-color: #e6c9bb; }
+  .desk-fallback { margin-top: 14px; padding: 14px 16px; border-radius: 12px; background: var(--warn-soft); border: 1px solid #e8d3a8; }
+  .desk-fallback p { font-size: .92rem; color: #7a5a1c; margin: 0 0 .8em; }
+  .desk-fallback-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ------------------------------------------------------------------ done */
+  .desk-done { max-width: 620px; margin: 6vh auto 0; }
+  .desk-done-status { color: var(--ink-soft); font-size: 1.02rem; }
+  .desk-done-status.is-good { color: var(--good); font-weight: 600; }
+  .desk-done-facts { margin: 18px 0; border-top: 1px solid var(--rule-soft); }
+  .desk-done-facts div { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule-soft); font-size: .9rem; }
+  .desk-done-facts dt { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: .7rem; font-weight: 700; width: 74px; flex: none; padding-top: .25em; }
+  .desk-done-facts dd { margin: 0; min-width: 0; }
+  .desk-done-facts code { font-family: var(--mono); }
+  .desk-done-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* ------------------------------------------------------------- wide desk */
+  @media (min-width: 960px) {
+    .desk-view { padding: 40px 28px 60px; }
+    .desk-editor.is-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+    .desk-editor.is-split .desk-pane { position: sticky; top: 132px; }
+    .desk-editor.is-split .desk-body { min-height: 62vh; }
+    .desk-tabs { display: none; }
+    .desk-actions { margin: 22px -28px -60px; padding: 14px 28px; }
+    .desk-editor-bar { top: 68px; }
+  }
+
+  @media (max-width: 560px) {
+    .desk-bar-actions { width: 100%; }
+    .desk-bar-actions .btn { flex: 1; justify-content: center; }
+    .desk-item { grid-template-columns: auto minmax(0, 1fr); }
+    .desk-item-view { grid-column: 2; justify-self: start; }
+    .desk-actions { flex-direction: column-reverse; align-items: stretch; }
+    .desk-actions-right { justify-content: space-between; }
+    .desk-actions-right .btn { flex: 1; justify-content: center; }
+  }
+</style>

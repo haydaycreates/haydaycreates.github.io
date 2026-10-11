@@ -27,8 +27,8 @@ const links = [
           aria-current={active === link.href ? 'page' : undefined}
         >{link.label}</a>
       ))}
-      {site.adminLink && (
-        <a class="btn btn-ghost btn-sm nav-write" href={site.adminLink}>
+      {site.writeLink && (
+        <a class="btn btn-ghost btn-sm nav-write" href={site.writeLink}>
           <Fragment set:html={ICONS.pen} /> Write
         </a>
       )}

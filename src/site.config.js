@@ -57,25 +57,35 @@ export const site = {
   postsPerPage: 9,
 
   /**
-   * The nav's "Write" button. It now points at the Decap CMS dashboard in
-   * public/admin/ — sign in there and commit posts straight to git.
-   * Set it to '' to hide the button, or swap in your own editor URL.
+   * The nav's "Write" button. It points at the private writing desk at /write/,
+   * which commits markdown to your repository using a GitHub token kept in your
+   * own browser. Anyone else who opens that page sees a lock screen and can
+   * change nothing.
+   * Set it to '' to hide the button entirely.
    */
-  adminLink: '/admin/',
+  writeLink: '/write/',
 
   /**
-   * Load the Netlify Identity widget on every page. Needed only when you send
-   * invitation emails: the invite link lands on the home page with a token in
-   * the URL fragment, and this widget is what turns that into a login.
+   * Where the writing desk reads and commits your posts.
    *
-   * Leave false if you sign in to /admin/ directly (the admin page loads the
-   * widget itself) — or set true if you want invitations to work end to end.
+   * This is the whole backend: a static page, GitHub's Contents API, and the
+   * token you paste in. Change `owner`/`repo` if you fork the site, or `branch`
+   * if you write to somewhere other than main.
+   *
+   *   postsDir — the folder Astro reads, so the desk writes where the build looks
+   *   mediaDir — cover images land here and are served from /uploads/…
    */
-  identityWidget: false,
+  writeDesk: {
+    owner: 'haydaycreates',
+    repo: 'haydaycreates.github.io',
+    branch: 'main',
+    postsDir: 'src/content/blog',
+    mediaDir: 'public/uploads',
+  },
 
   /* Absolute URL used in RSS, the sitemap and canonical tags.
      SITE_URL=https://yourdomain.com npm run build overrides this. */
-  url: "https://theslowdraft.netlify.app",
+  url: "https://haydaycreates.github.io",
 };
 
 export default site;

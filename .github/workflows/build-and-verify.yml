@@ -1,12 +1,17 @@
 # Build and verify — runs on every push and pull request.
 #
-# Four checks run on GitHub before a broken post or incomplete CMS bundle can
-# reach the live site:
+# Four checks run on GitHub before a broken post or a broken editor can reach
+# the live site:
 #
-#   1. check:cms    — does public/admin/config.yml still match the content model?
-#   2. build        — does Astro accept every markdown file?
-#   3. check:admin  — did the self-hosted Decap bundle and all its chunks reach dist/?
-#   4. check:links  — does every local link, font path and asset in the output resolve?
+#   1. build          — does Astro accept every markdown file?
+#   2. check:desk     — does the writing desk still render markdown, round-trip
+#                       frontmatter and ship a page that is noindex?
+#   3. check:desk:ui  — can you still unlock, write, publish, draft, rename and
+#                       recover a post? (a whole session, driven through a DOM)
+#   4. check:links    — does every local link, font path and asset in the output resolve?
+#
+# 2 and 3 are what stop /write/ from quietly breaking: the desk has no server, so
+# nothing else would notice if it stopped writing files the site can build.
 
 name: Build and verify
 
@@ -19,6 +24,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -30,5 +36,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify CMS config, build, audit links
+      - name: Build and verify the writing desk and links
         run: npm run verify

@@ -10,6 +10,9 @@ const {
   description = '',
   active = '',
   bodyClass = '',
+  /* `bare` drops the newsletter and footer: the writing desk at /write/ is an
+     app-like page, not an article, and needs the screen for itself. */
+  bare = false,
 } = Astro.props;
 
 /* Typography comes from site.config.js and is applied as a body class plus two
@@ -48,24 +51,8 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <main id="main">
       <slot />
     </main>
-    <Newsletter />
-    <Footer />
+    {!bare && <Newsletter />}
+    {!bare && <Footer />}
     <script src="/site.js" defer></script>
-    {site.identityWidget && (
-      <>
-        {/* Invitation emails land here with a token in the fragment; this widget
-            converts it into a session for /admin/. See site.config.js. */}
-        <script src="https://identity.netlify.com/v1/netlify-identity-widget.js" is:inline></script>
-        <script is:inline>
-          if (window.netlifyIdentity) {
-            window.netlifyIdentity.on('init', (user) => {
-              if (!user) {
-                window.netlifyIdentity.on('login', () => { document.location.href = '/admin/'; });
-              }
-            });
-          }
-        </script>
-      </>
-    )}
   </body>
 </html>

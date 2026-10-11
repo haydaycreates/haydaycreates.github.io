@@ -21,7 +21,7 @@ const socials = socialItems(site);
       <a href="/resources/">Resources</a>
       <a href="/blog/">Blog</a>
       <a href="/rss.xml">RSS</a>
-      {site.adminLink && <a href={site.adminLink}>Write</a>}
+      {site.writeLink && <a href={site.writeLink}>Write</a>}
     </nav>
     <div class="social">
       {socials.map((item) => (

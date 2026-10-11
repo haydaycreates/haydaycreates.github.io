@@ -115,20 +115,6 @@ for (const file of cssFiles) {
   }
 }
 
-/* ------------------------------- the CMS route ---------------------------- */
-
-const adminHtml = path.join(outDir, 'admin', 'index.html');
-const adminConfig = path.join(outDir, 'admin', 'config.yml');
-if (!fs.existsSync(adminHtml)) problems.push('admin/index.html is missing from the build');
-if (!fs.existsSync(adminConfig)) problems.push('admin/config.yml is missing from the build');
-if (fs.existsSync(adminConfig)) {
-  const config = fs.readFileSync(adminConfig, 'utf8');
-  if (/site_url: https:\/\/the-slow-draft\.example/.test(config)) {
-    console.log('\n  note  admin/config.yml still carries the placeholder site_url');
-    console.log('        (set SITE_URL in the host\'s environment variables to stamp your domain)');
-  }
-}
-
 /* ---------------------------------- report -------------------------------- */
 
 const sizeOf = (dir) => {

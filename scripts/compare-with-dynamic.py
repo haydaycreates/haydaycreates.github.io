@@ -34,7 +34,7 @@ def normalise(html):
     html = re.sub(r'<!--[\s\S]*?-->', '', html)
     # elements that only exist in the dynamic build
     html = re.sub(r'<a class="btn btn-ghost btn-sm nav-write"[^>]*>.*?</a>', '', html, flags=re.S)
-    html = re.sub(r'<a href="/admin/?"[^>]*>Write</a>', '', html)
+    html = re.sub(r'<a href="/(?:admin|write)/?"[^>]*>Write</a>', '', html)
     html = re.sub(r'<link rel="canonical"[^>]*>', '', html)
     html = re.sub(r'<span class="chip chip-draft">[^<]*</span>', '', html)
     return html
