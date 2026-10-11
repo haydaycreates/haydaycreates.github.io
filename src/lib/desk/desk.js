@@ -10,6 +10,11 @@
  * Built mobile-first: one pane at a time, thumb-sized buttons, writing kept safe
  * in localStorage so a locked phone or a reload never costs you a paragraph.
  * On a wide screen the preview sits beside the editor instead.
+ *
+ * The desk is also where the site itself gets edited: the Settings view reads
+ * src/data/settings.json (identity, about, social links, appearance,
+ * newsletter) and the resources in src/content/resources/, and commits them
+ * back through the same Contents API client — Save settings is one commit.
  */
 
 import { renderMarkdown, countWords } from './markdown.js';
@@ -21,6 +26,22 @@ import {
   slugify,
   today,
 } from './frontmatter.js';
+import {
+  SETTINGS_PATH,
+  RESOURCES_DIR,
+  SOCIAL_PRESETS,
+  mergeSettings,
+  parseSettings,
+  serializeSettings,
+  validateSettings,
+  getByPath,
+  setByPath,
+  toResourceFields,
+  buildResourceFile,
+  resourceSlug,
+  validateResource,
+} from './settings.js';
+import fonts from '../fonts.js';
 import {
   createGitHubClient,
   DeskError,
@@ -166,6 +187,11 @@ export function mountDesk(root) {
       say(lockNote, `${error.message}${hint}`, true);
       client = null;
       account = null;
+      /* The message lives inside the owner's fold. When the attempt came from
+         a token saved on the device, the fold is closed — open it, or the
+         owner would stare at a lock screen that says nothing. */
+      const ownerFold = $('[data-owner-details]', root);
+      if (ownerFold) ownerFold.open = true;
     } finally {
       if (submit) {
         submit.disabled = false;
@@ -701,12 +727,39 @@ export function mountDesk(root) {
     const file = fileInput.files?.[0];
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
-      showNotice(`That image is ${(file.size / 1024 / 1024).toFixed(1)} MB — please keep uploads under 10 MB.`, true);
+      const notify = uploadTarget === 'portrait' ? saySettings : showNotice;
+      notify(`That image is ${(file.size / 1024 / 1024).toFixed(1)} MB — please keep uploads under 10 MB.`, true);
+      return;
+    }
+
+    const extension = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    /* The About portrait: uploaded to mediaDir like any photo, then written
+       into the settings form — it reaches the repository with the next
+       Save settings. */
+    if (uploadTarget === 'portrait') {
+      const name = `portrait-${Date.now().toString(36)}.${extension}`;
+      const path = `${mediaDir}/${name}`;
+      const publicUrl = `/uploads/${name}`;
+      saySettings(`Uploading ${file.name}…`);
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        await client.writeFile(path, bytes, `Upload ${name}`, {});
+        setByPath(settingsState.data, 'author.photo', publicUrl);
+        $$('[data-setting="author.photo"]', root).forEach((input) => {
+          input.value = publicUrl;
+        });
+        updatePortraitPreview();
+        markSettingsDirty();
+        saySettings(`Uploaded — your portrait is at ${publicUrl}. Press Save settings to keep it.`);
+      } catch (error) {
+        const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
+        saySettings(`${error.message}${hint}`, true);
+      }
       return;
     }
 
     readForm();
-    const extension = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
     const stem = draft.slug || slugify(draft.fields.title) || 'image';
     const name = `${stem}-${Date.now().toString(36)}.${extension}`;
     const path = `${mediaDir}/${name}`;
@@ -959,6 +1012,597 @@ export function mountDesk(root) {
       const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
       showNotice(`${error.message}${hint}`, true);
     }
+  });
+
+  /* --------------------------------- settings ------------------------------ */
+
+  /**
+   * The Settings view — the owner-editable half of the site.
+   *
+   * Everything here reads from and commits to two places in the repository:
+   *
+   *   src/data/settings.json     site identity, about, social links,
+   *                              appearance, newsletter — one Save, one commit
+   *   src/content/resources/*.md the recommended links — one file per
+   *                              resource, so each add, edit, delete and
+   *                              reorder commits as it happens
+   *
+   * The site merges settings.json over the defaults in src/lib/desk/settings.js
+   * at build time, so whatever is committed here is what the next rebuild shows.
+   */
+
+  const settingsPath = config.settingsPath || SETTINGS_PATH;
+  const resourcesDir = config.resourcesDir || RESOURCES_DIR;
+
+  const settingsNote = $('[data-settings-note]', root);
+  const settingsStateLabel = $('[data-settings-state]', root);
+  const settingsDirtyLabel = $('[data-settings-dirty]', root);
+  const settingsSavedLabel = $('[data-settings-saved]', root);
+  const settingsSaveButton = $('[data-settings-save]', root);
+  const settingsReloadButton = $('[data-settings-reload]', root);
+  const socialList = $('[data-social-list]', root);
+  const resourceList = $('[data-resource-list]', root);
+  const resourceEmpty = $('[data-resource-empty]', root);
+  const portraitPreview = $('[data-portrait-preview]', root);
+  const typePreview = $('[data-type-preview]', root);
+
+  const settingsState = {
+    loaded: false,
+    exists: true, /* does src/data/settings.json exist in the repository? */
+    sha: '',
+    data: mergeSettings({}),
+    saved: serializeSettings(mergeSettings({})),
+  };
+  let resources = []; /* [{ name, path, sha, fields, isNew? }] in display order */
+
+  const saySettings = (message, isError = false) => say(settingsNote, message, isError);
+
+  function setSettingsState(text) {
+    if (settingsStateLabel) settingsStateLabel.textContent = text;
+  }
+
+  function setSettingsBusy(busy, label) {
+    if (settingsSaveButton) settingsSaveButton.disabled = busy;
+    if (settingsReloadButton) settingsReloadButton.disabled = busy;
+    if (busy) setSettingsState(label || 'Working…');
+    else {
+      setSettingsState(
+        settingsState.exists
+          ? 'Editing · loaded from your repository'
+          : 'New · not in the repository yet'
+      );
+    }
+  }
+
+  function markSettingsDirty() {
+    if (!settingsDirtyLabel) return;
+    const dirty = serializeSettings(settingsState.data) !== settingsState.saved;
+    settingsDirtyLabel.textContent = dirty ? 'Unsaved changes' : 'All changes saved';
+  }
+
+  /* --------------------------- the settings form -------------------------- */
+
+  const TYPE_SCALE = { small: '1.05rem', medium: '1.145rem', large: '1.28rem' };
+  const HEADING_SCALE = { small: '1.35rem', medium: '1.6rem', large: '1.9rem' };
+
+  /** The appearance preview reads like the top of the home page, live. */
+  function refreshTypePreview() {
+    if (!typePreview) return;
+    const { typography, hero } = settingsState.data;
+    const bodyStack = fonts.stackFor(typography.body);
+    const headStack = fonts.stackFor(typography.heading);
+    const bodySize = TYPE_SCALE[typography.size] || TYPE_SCALE.medium;
+    const headSize = HEADING_SCALE[typography.size] || HEADING_SCALE.medium;
+
+    const kicker = $('[data-type-kicker]', typePreview);
+    const heading = $('[data-type-heading]', typePreview);
+    const body = $('[data-type-body]', typePreview);
+    if (kicker) {
+      kicker.style.fontFamily = headStack;
+      kicker.textContent = hero.kicker || 'A personal blog';
+    }
+    if (heading) {
+      heading.style.fontFamily = headStack;
+      heading.style.fontSize = headSize;
+      heading.textContent = hero.heading || 'Notes from the slow lane of the internet.';
+    }
+    if (body) {
+      body.style.fontFamily = bodyStack;
+      body.style.fontSize = bodySize;
+      body.textContent =
+        hero.intro ||
+        'Long-ish thoughts on writing, craft, and the small systems that keep a creative life running.';
+    }
+  }
+
+  function updatePortraitPreview() {
+    if (!portraitPreview) return;
+    const photo = String(settingsState.data.author.photo || '').trim();
+    portraitPreview.hidden = !photo;
+    if (photo) portraitPreview.src = photo;
+  }
+
+  /** Puts the settings state into every bound field. */
+  function syncSettingsForm() {
+    $$('[data-setting]', root).forEach((field) => {
+      const value = getByPath(settingsState.data, field.dataset.setting);
+      field.value = value == null ? '' : String(value);
+    });
+    updatePortraitPreview();
+  }
+
+  function onSettingField(field) {
+    const key = field.dataset.setting;
+    setByPath(settingsState.data, key, field.value);
+    /* The newsletter email and the about email are the same setting; both
+       inputs show it, so typing in one updates the other. */
+    $$('[data-setting]', root).forEach((other) => {
+      if (other !== field && other.dataset.setting === key && other.value !== field.value) {
+        other.value = field.value;
+      }
+    });
+    if (key === 'author.photo') updatePortraitPreview();
+    if (key.startsWith('typography.') || key.startsWith('hero.')) refreshTypePreview();
+    markSettingsDirty();
+  }
+
+  $$('[data-setting]', root).forEach((field) => {
+    field.addEventListener('input', () => onSettingField(field));
+    field.addEventListener('change', () => onSettingField(field));
+  });
+
+  /* ------------------------------ social links ---------------------------- */
+
+  function renderSocialList() {
+    if (!socialList) return;
+    socialList.innerHTML = '';
+
+    settingsState.data.social.forEach((entry, index) => {
+      const row = document.createElement('li');
+      row.className = 'desk-social-row';
+
+      const preset = SOCIAL_PRESETS.find((item) => item.id === entry.id);
+
+      const label = document.createElement('input');
+      label.type = 'text';
+      label.className = 'desk-input desk-social-label';
+      label.placeholder = 'Label';
+      label.value = entry.label;
+      label.setAttribute('aria-label', `Link ${index + 1} label`);
+      label.dataset.socialLabel = '';
+
+      const url = document.createElement('input');
+      url.type = 'text';
+      url.className = 'desk-input desk-social-url';
+      url.placeholder = preset?.placeholder || 'https://…';
+      url.spellcheck = false;
+      url.value = entry.url;
+      url.setAttribute('aria-label', `${entry.label || 'Link'} address`);
+      url.dataset.socialUrl = '';
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-ghost btn-sm desk-social-remove';
+      remove.textContent = '✕';
+      remove.title = `Remove ${entry.label || 'this link'}`;
+      remove.setAttribute('aria-label', `Remove ${entry.label || 'this link'}`);
+      remove.dataset.socialRemove = '';
+
+      label.addEventListener('input', () => {
+        settingsState.data.social[index].label = label.value;
+        markSettingsDirty();
+      });
+      url.addEventListener('input', () => {
+        settingsState.data.social[index].url = url.value;
+        markSettingsDirty();
+      });
+      remove.addEventListener('click', () => {
+        settingsState.data.social.splice(index, 1);
+        renderSocialList();
+        markSettingsDirty();
+      });
+
+      row.append(label, url, remove);
+      socialList.append(row);
+    });
+  }
+
+  $$('[data-social-add]', root).forEach((button) =>
+    button.addEventListener('click', () => {
+      const kind = button.dataset.socialAdd;
+      const preset = SOCIAL_PRESETS.find((item) => item.id === kind);
+      if (preset) {
+        const existing = settingsState.data.social.findIndex((entry) => entry.id === preset.id);
+        if (existing > -1) {
+          /* Already listed — jump to its address box instead of doubling up. */
+          socialList?.children[existing]?.querySelector('[data-social-url]')?.focus();
+          return;
+        }
+        settingsState.data.social.push({ id: preset.id, label: preset.label, url: '' });
+      } else {
+        settingsState.data.social.push({ id: '', label: '', url: '' });
+      }
+      renderSocialList();
+      markSettingsDirty();
+      const row = socialList?.children[settingsState.data.social.length - 1];
+      (preset ? row?.querySelector('[data-social-url]') : row?.querySelector('[data-social-label]'))?.focus();
+    })
+  );
+
+  /* -------------------------------- resources ----------------------------- */
+
+  function sortResources() {
+    resources.sort(
+      (a, b) => a.fields.order - b.fields.order || a.fields.title.localeCompare(b.fields.title)
+    );
+  }
+
+  function makeResourceInput(tag, value, placeholder, labelText, key) {
+    const field = document.createElement('label');
+    field.className = 'desk-field';
+    const span = document.createElement('span');
+    span.className = 'desk-label';
+    span.textContent = labelText;
+    const input = document.createElement(tag);
+    input.className = tag === 'textarea' ? 'desk-input desk-area-sm' : 'desk-input';
+    if (tag === 'textarea') input.rows = 2;
+    if (placeholder) input.placeholder = placeholder;
+    input.value = value;
+    input.dataset[key] = '';
+    field.append(span, input);
+    return field;
+  }
+
+  function readResourceCard(resource, card) {
+    resource.fields.title = $('[data-res-title]', card).value;
+    resource.fields.url = $('[data-res-url]', card).value.trim();
+    resource.fields.category = $('[data-res-category]', card).value.trim() || 'General';
+    resource.fields.description = $('[data-res-description]', card).value;
+  }
+
+  function renderResourceList() {
+    if (!resourceList) return;
+    resourceList.innerHTML = '';
+    if (resourceEmpty) resourceEmpty.hidden = resources.length > 0;
+
+    resources.forEach((resource, index) => {
+      const card = document.createElement('li');
+      card.className = 'desk-resource-card';
+
+      const head = document.createElement('p');
+      head.className = 'desk-resource-pos';
+      head.textContent = `${index + 1}. ${resource.isNew ? 'New resource — not committed yet' : resource.name}`;
+
+      const fields = document.createElement('div');
+      fields.className = 'desk-fields';
+      fields.append(
+        makeResourceInput('input', resource.fields.title, 'iA Writer', 'Title', 'resTitle'),
+        makeResourceInput('input', resource.fields.url, 'https://…', 'Link', 'resUrl'),
+        makeResourceInput('input', resource.fields.category, 'Tools', 'Category', 'resCategory'),
+        makeResourceInput('textarea', resource.fields.description, 'One line about why it is worth the visit.', 'Description', 'resDescription')
+      );
+
+      const actions = document.createElement('div');
+      actions.className = 'desk-resource-actions';
+
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'btn btn-ghost btn-sm';
+      up.textContent = '↑';
+      up.title = 'Move up';
+      up.disabled = index === 0;
+      up.dataset.resUp = '';
+
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.className = 'btn btn-ghost btn-sm';
+      down.textContent = '↓';
+      down.title = 'Move down';
+      down.disabled = index === resources.length - 1;
+      down.dataset.resDown = '';
+
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'btn btn-accent btn-sm';
+      save.textContent = resource.isNew ? 'Add it' : 'Save';
+      save.dataset.resSave = '';
+
+      up.addEventListener('click', () => moveResource(resource, -1));
+      down.addEventListener('click', () => moveResource(resource, 1));
+      save.addEventListener('click', () => saveResource(resource, card));
+
+      actions.append(up, down, save);
+
+      /* Deleting is permanent, so it asks twice — the same two-step the post
+         editor uses. A resource that was never committed just goes away. */
+      if (!resource.isNew) {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'btn btn-danger btn-sm';
+        del.textContent = 'Delete';
+        del.dataset.resDelete = '';
+
+        const confirm = document.createElement('span');
+        confirm.className = 'desk-resource-confirm';
+        confirm.dataset.resConfirm = '';
+        confirm.hidden = true;
+        const really = document.createElement('button');
+        really.type = 'button';
+        really.className = 'btn btn-danger btn-sm';
+        really.textContent = 'Yes, delete';
+        really.dataset.resDeleteGo = '';
+        const keep = document.createElement('button');
+        keep.type = 'button';
+        keep.className = 'btn btn-ghost btn-sm';
+        keep.textContent = 'Keep it';
+        keep.dataset.resDeleteCancel = '';
+        confirm.append(really, keep);
+
+        del.addEventListener('click', () => {
+          confirm.hidden = false;
+          del.hidden = true;
+        });
+        keep.addEventListener('click', () => {
+          confirm.hidden = true;
+          del.hidden = false;
+        });
+        really.addEventListener('click', () => deleteResource(resource));
+
+        actions.append(del, confirm);
+      }
+
+      card.append(head, fields, actions);
+      resourceList.append(card);
+    });
+  }
+
+  async function saveResource(resource, card) {
+    if (!client) return;
+    readResourceCard(resource, card);
+    const problems = validateResource(resource.fields);
+    if (problems.length) {
+      saySettings(problems.join(' '), true);
+      return;
+    }
+
+    const isNew = Boolean(resource.isNew) || !resource.path;
+    const path = isNew
+      ? `${resourcesDir}/${resourceSlug(resource.fields.title)}.md`
+      : resource.path;
+    if (isNew && resources.some((other) => other !== resource && other.path === path)) {
+      saySettings(`A resource called “${resource.fields.title}” is already in the list. Edit that one instead.`, true);
+      return;
+    }
+    if (isNew) resource.fields.order = resources.filter((other) => !other.isNew).length;
+
+    setSettingsBusy(true, isNew ? 'Adding the resource…' : 'Committing the resource…');
+    try {
+      const message = isNew
+        ? `Add resource “${resource.fields.title}”`
+        : `Update resource “${resource.fields.title}”`;
+      const result = await client.writeFile(path, buildResourceFile(resource.fields), message, {
+        sha: isNew ? '' : resource.sha,
+      });
+      resource.path = path;
+      resource.name = path.split('/').pop();
+      resource.sha = result.sha;
+      resource.isNew = false;
+      sortResources();
+      renderResourceList();
+      setSettingsBusy(false);
+      saySettings(
+        `${isNew ? 'Added' : 'Saved'} “${resource.fields.title}” — commit ${String(result.commit || '').slice(0, 7)}. It appears on /resources/ after the next rebuild.`
+      );
+    } catch (error) {
+      setSettingsBusy(false);
+      if (error instanceof DeskError && error.status === 422 && isNew) {
+        saySettings(`The repository already has a file at ${path}. Pick a different title, or edit that resource here.`, true);
+        return;
+      }
+      const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
+      saySettings(`${error.message}${hint}`, true);
+    }
+  }
+
+  async function deleteResource(resource) {
+    if (!client || !resource.path) return;
+    setSettingsBusy(true, 'Deleting the resource…');
+    try {
+      await client.deleteFile(resource.path, resource.sha, `Delete resource “${resource.fields.title}”`);
+      resources = resources.filter((other) => other !== resource);
+      renderResourceList();
+      setSettingsBusy(false);
+      saySettings(`Deleted “${resource.fields.title}”. It leaves /resources/ after the next rebuild.`);
+    } catch (error) {
+      setSettingsBusy(false);
+      const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
+      saySettings(`${error.message}${hint}`, true);
+    }
+  }
+
+  /**
+   * Reordering renumbers the list 0…n−1 and commits only the files whose
+   * `order` value actually changed — an adjacent swap is two small commits.
+   */
+  async function moveResource(resource, direction) {
+    if (!client) return;
+    const index = resources.indexOf(resource);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= resources.length) return;
+
+    const moved = resource.fields.title || 'the resource';
+    [resources[index], resources[target]] = [resources[target], resources[index]];
+
+    const changed = [];
+    resources.forEach((item, position) => {
+      if (item.fields.order !== position) {
+        item.fields.order = position;
+        if (!item.isNew && item.path) changed.push(item);
+      }
+    });
+    renderResourceList();
+    if (!changed.length) return;
+
+    setSettingsBusy(true, 'Reordering…');
+    try {
+      for (const item of changed) {
+        const result = await client.writeFile(
+          item.path,
+          buildResourceFile(item.fields),
+          `Reorder resources — move “${moved}” ${direction < 0 ? 'up' : 'down'}`,
+          { sha: item.sha }
+        );
+        item.sha = result.sha;
+      }
+      setSettingsBusy(false);
+      saySettings(`Reordered — ${changed.length} file${changed.length === 1 ? '' : 's'} committed.`);
+    } catch (error) {
+      setSettingsBusy(false);
+      const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
+      saySettings(`${error.message}${hint} Discard changes to load what the repository actually holds.`, true);
+    }
+  }
+
+  $('[data-resource-add]', root)?.addEventListener('click', () => {
+    resources.push({
+      name: '',
+      path: '',
+      sha: '',
+      isNew: true,
+      fields: { title: '', url: '', category: 'General', description: '', order: resources.length },
+    });
+    renderResourceList();
+    resourceList?.lastElementChild?.querySelector('[data-res-title]')?.focus();
+  });
+
+  /* ------------------------- opening and committing ----------------------- */
+
+  async function loadResources() {
+    try {
+      const files = await client.listPosts(resourcesDir);
+      resources = await mapWithLimit(files, 5, async (file) => {
+        try {
+          const { text, sha } = await client.readFile(file.path);
+          return { name: file.name, path: file.path, sha, fields: toResourceFields(text) };
+        } catch {
+          return {
+            name: file.name,
+            path: file.path,
+            sha: '',
+            fields: { title: file.name.replace(/\.mdx?$/i, ''), url: '', category: 'General', description: '', order: 0 },
+          };
+        }
+      });
+    } catch (error) {
+      /* A repository with no resources folder yet is fine — the list is empty. */
+      if (error instanceof DeskError && error.status === 404) resources = [];
+      else throw error;
+    }
+    sortResources();
+  }
+
+  async function openSettings() {
+    show('settings');
+    saySettings('');
+    setSettingsState('Loading your settings…');
+    if (settingsSaveButton) settingsSaveButton.disabled = true;
+    if (settingsReloadButton) settingsReloadButton.disabled = true;
+
+    try {
+      let text = '';
+      try {
+        const read = await client.readFile(settingsPath);
+        text = read.text;
+        settingsState.sha = read.sha || '';
+        settingsState.exists = true;
+      } catch (error) {
+        if (error instanceof DeskError && error.status === 404) {
+          text = '';
+          settingsState.sha = '';
+          settingsState.exists = false;
+        } else throw error;
+      }
+
+      const parsed = parseSettings(text);
+      if (parsed.ok) {
+        settingsState.data = mergeSettings(parsed.data);
+      } else {
+        settingsState.data = mergeSettings({});
+        saySettings(
+          `${settingsPath} could not be read as JSON (${parsed.error}). The defaults are shown — saving replaces the broken file.`,
+          true
+        );
+      }
+      settingsState.saved = serializeSettings(settingsState.data);
+      settingsState.loaded = true;
+
+      await loadResources();
+      syncSettingsForm();
+      renderSocialList();
+      renderResourceList();
+      refreshTypePreview();
+      markSettingsDirty();
+      setSettingsBusy(false);
+      if (!settingsState.exists) {
+        saySettings('No settings file in the repository yet — the defaults are shown. Save to create it.');
+      }
+    } catch (error) {
+      setSettingsBusy(false);
+      setSettingsState('');
+      const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
+      saySettings(`${error.message}${hint}`, true);
+    }
+  }
+
+  settingsSaveButton?.addEventListener('click', async () => {
+    if (!client || !settingsState.loaded) return;
+
+    const problems = validateSettings(settingsState.data);
+    if (problems.length) {
+      saySettings(problems.join(' '), true);
+      return;
+    }
+
+    const text = serializeSettings(settingsState.data);
+    saySettings('');
+    setSettingsBusy(true, 'Committing your settings…');
+    try {
+      const result = await client.writeFile(
+        settingsPath,
+        text,
+        settingsState.exists ? 'Update site settings' : 'Create site settings',
+        { sha: settingsState.sha }
+      );
+      settingsState.sha = result.sha;
+      settingsState.exists = true;
+      settingsState.saved = text;
+      setSettingsBusy(false);
+      markSettingsDirty();
+      if (settingsSavedLabel) {
+        settingsSavedLabel.textContent = `Committed ${String(result.commit || '').slice(0, 7)} at ${clockTime()}`;
+      }
+      saySettings('Saved — one commit to src/data/settings.json. Your host rebuilds from it, and the site picks the changes up in a minute or two.');
+    } catch (error) {
+      setSettingsBusy(false);
+      if (error instanceof DeskError && error.status === 409) {
+        saySettings('That file changed on GitHub since you opened it. Discard changes to load the newer version, then re-apply them.', true);
+        return;
+      }
+      const hint = error instanceof DeskError && error.hint ? ` ${error.hint}` : '';
+      saySettings(`${error.message}${hint}`, true);
+    }
+  });
+
+  settingsReloadButton?.addEventListener('click', () => {
+    if (client) openSettings();
+  });
+
+  $('[data-settings]', root)?.addEventListener('click', () => {
+    if (client) openSettings();
+  });
+
+  $('[data-settings-back]', root)?.addEventListener('click', () => {
+    openLibrary();
   });
 
   /* --------------------------------- done view ---------------------------- */

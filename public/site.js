@@ -1,6 +1,7 @@
 /* Public site interactions — no dependencies.
    Static build: no server calls. The newsletter form posts to whatever endpoint
-   you configure in src/site.config.js, and falls back to a mailto: link. */
+   you configure in /write/ → Settings (src/data/settings.json), and falls back
+   to a mailto: link to the author's inbox. */
 (function () {
   'use strict';
 
@@ -37,7 +38,7 @@
       /* No endpoint configured: hand the address to the writer's inbox instead. */
       if (!endpoint) {
         e.preventDefault();
-        if (!owner) { say('Set a newsletter endpoint in src/site.config.js.', true); return; }
+        if (!owner) { say('Set the newsletter email in /write/ → Settings.', true); return; }
         var subject = encodeURIComponent('Subscribe me to ' + document.title.split('—').pop().trim());
         var body = encodeURIComponent('Please add this address to the list:\n\n' + email + '\n');
         say('Opening your email app — send the message and you are on the list.');

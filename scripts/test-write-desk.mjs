@@ -5,11 +5,14 @@
  * The desk has no server, so the contract worth proving is the same one the CMS
  * test proves: "anything the editor writes, Astro builds". The desk serialises
  * frontmatter itself and renders its own preview, so this checks both halves —
- * the markdown preview, the frontmatter it reads and writes, the base64 the
- * GitHub API is given, and finally a real build of a desk-written post.
+ * the markdown preview, the frontmatter it reads and writes, the settings JSON
+ * its Settings view commits, the resource files its Resources editor writes,
+ * the base64 the GitHub API is given, and finally a real build of everything
+ * the desk can commit.
  *
  *   npm run check:desk          fast: the editor's own logic + the built page
- *   npm run test:desk           …plus a real build of posts the desk wrote
+ *   npm run test:desk           …plus a real build of everything the desk can
+ *                               commit — posts, settings.json and resources
  *   node scripts/test-write-desk.mjs --build --keep   build and leave dist alone
  */
 
@@ -30,10 +33,30 @@ import {
   normalizeDate,
   today,
 } from '../src/lib/desk/frontmatter.js';
+import {
+  SETTINGS_DEFAULTS,
+  SOCIAL_PRESETS,
+  mergeSettings,
+  normalizeSocial,
+  normalizeTypography,
+  parseSettings,
+  sanitizeSettings,
+  serializeSettings,
+  validateSettings,
+  getByPath,
+  setByPath,
+  toResourceFields,
+  buildResourceFile,
+  resourceSlug,
+  validateResource,
+} from '../src/lib/desk/settings.js';
+import { FONTS, TEXT_SIZES, byId } from '../src/lib/fonts.js';
 import { toBase64, fromBase64, DeskError } from '../src/lib/desk/github.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const blogDir = path.join(root, 'src/content/blog');
+const resourcesDir = path.join(root, 'src/content/resources');
+const settingsFile = path.join(root, 'src/data/settings.json');
 const outDir = path.join(root, 'dist');
 
 const fullBuild = process.argv.includes('--build');
@@ -193,6 +216,150 @@ console.log('  --------------------------------------------------------------');
   expect(serializeFrontmatter({}) === '---\n---\n', 'empty frontmatter is still valid');
 }
 
+/* ---------------------------------- settings ------------------------------- */
+
+console.log('');
+console.log('  Settings — merging over the defaults');
+console.log('  ------------------------------------');
+
+{
+  const defaults = mergeSettings({});
+  expect(JSON.stringify(defaults) === JSON.stringify(SETTINGS_DEFAULTS), 'no overrides merges to exactly the defaults');
+  expect(Array.isArray(defaults.social) && defaults.social.length === SOCIAL_PRESETS.length, 'the four known networks are listed by default');
+
+  const renamed = mergeSettings({ title: 'Renamed', hero: { heading: 'A new heading' } });
+  expect(renamed.title === 'Renamed' && renamed.tagline === SETTINGS_DEFAULTS.tagline, 'a scalar override replaces just itself');
+  expect(renamed.hero.heading === 'A new heading' && renamed.hero.kicker === SETTINGS_DEFAULTS.hero.kicker, 'a partial object merge keeps its siblings');
+
+  const oneSocial = mergeSettings({ social: [{ label: 'Mastodon', url: 'https://mastodon.social/@me' }] });
+  expect(oneSocial.social.length === 1, 'a saved social list replaces the defaults instead of extending them');
+
+  const legacy = mergeSettings({ social: { twitter: 'https://x.com/slow', github: 'https://github.com/slow' } });
+  expect(legacy.social.find((link) => link.id === 'x')?.url === 'https://x.com/slow', 'the old { twitter } shape reads into the X row');
+  expect(legacy.social.find((link) => link.id === 'github')?.url === 'https://github.com/slow', 'and the old github key into the GitHub row');
+  expect(legacy.social.length === 4, 'the other presets stay available');
+
+  const withCustom = normalizeSocial({ twitter: '', custom: [{ label: 'Bluesky', url: 'https://bsky.app/profile/me' }] });
+  expect(withCustom.some((link) => link.label === 'Bluesky'), 'custom links survive the legacy shape too');
+
+  const dropped = mergeSettings({ social: [{ id: '', label: '', url: '' }, { label: 'X', url: 'https://x.com/a' }] });
+  expect(dropped.social.length === 1, 'a social row with neither label nor url is dropped');
+
+  const typo = mergeSettings({ typography: { body: 'comic-sans', heading: null, size: 'huge' } });
+  expect(typo.typography.body === 'lora' && typo.typography.heading === 'playfair' && typo.typography.size === 'medium', 'unknown typefaces and sizes fall back to the defaults');
+  expect(normalizeTypography({ body: 'inter', heading: 'poppins', size: 'large' }).body === 'inter', 'a valid pick is kept');
+}
+
+console.log('');
+console.log('  Settings — serialising what the desk commits');
+console.log('  --------------------------------------------');
+
+{
+  const text = serializeSettings(mergeSettings({ title: 'Round Trip', author: { email: 'me@example.com' } }));
+  const parsed = parseSettings(text);
+  expect(parsed.ok && parsed.data.title === 'Round Trip', 'what the desk writes, the desk can read');
+  expect(parsed.data.author.email === 'me@example.com', 'nested values survive the round trip');
+  expect(text.endsWith('\n') && !text.endsWith('\n\n'), 'the file ends with exactly one newline');
+  expect(
+    serializeSettings({ tagline: 'B', title: 'A' }) === serializeSettings({ title: 'A', tagline: 'B' }),
+    'the key order is stable, so an unchanged save is an unchanged file'
+  );
+  expect(parseSettings('').ok && parseSettings('').empty, 'an empty settings file is valid — it just means defaults');
+  expect(!parseSettings('{broken').ok, 'broken JSON is reported, not thrown');
+  expect(!parseSettings('[]').ok, 'a JSON array is refused');
+
+  const padded = parseSettings(serializeSettings({ title: '  Padded  ' })).data.title;
+  expect(padded === 'Padded', 'values are trimmed on the way into the file');
+
+  const state = { hero: { heading: 'before' } };
+  setByPath(state, 'hero.heading', 'after');
+  expect(getByPath(state, 'hero.heading') === 'after', 'the form writes through key paths');
+  setByPath(state, 'typography.size', 'large');
+  expect(getByPath(state, 'typography.size') === 'large', 'and creates the objects it passes through');
+
+  expect(validateSettings(mergeSettings({})).length === 0, 'the defaults pass validation');
+  expect(validateSettings({ title: ' ' }).some((problem) => /title/i.test(problem)), 'a site with no title is refused');
+  expect(validateSettings({ author: { email: 'nope' } }).some((problem) => /email/i.test(problem)), 'a malformed email is refused — subscriptions could not arrive');
+  expect(validateSettings({ social: [{ label: 'X', url: 'x.com/me' }] }).length > 0, 'a social link without https:// is refused');
+  expect(validateSettings({ newsletter: { endpoint: 'buttondown.example' } }).length > 0, 'a malformed endpoint is refused');
+  expect(validateSettings({ author: { email: '' }, newsletter: { endpoint: '' } }).length === 0, 'empty email and endpoint are fine — the mailto flow tolerates both');
+}
+
+/* --------------------------------- resources ------------------------------- */
+
+console.log('');
+console.log('  Resources — the files the Settings view edits');
+console.log('  ---------------------------------------------');
+
+{
+  const file = buildResourceFile({
+    title: 'A Desk-Written Resource',
+    url: 'https://example.com/desk',
+    category: 'Testing',
+    description: 'Written by the desk, quoted like the rest.',
+    order: 7,
+  });
+  expect(file.startsWith('---\ntitle: "A Desk-Written Resource"\n'), 'a resource file starts with frontmatter');
+  expect(/^order: 7$/m.test(file), 'order is written as a bare number — z.number() would refuse a quoted one');
+  expect(file.includes('url: "https://example.com/desk"'), 'the link is written');
+  expect(file.endsWith('---\n') && !file.includes('\n\n'), 'the file is frontmatter and nothing else');
+
+  const fields = toResourceFields(file);
+  expect(fields.title === 'A Desk-Written Resource' && fields.url === 'https://example.com/desk', 'what the desk writes, the desk can read');
+  expect(fields.category === 'Testing' && fields.order === 7, 'category and order come back intact');
+  expect(toResourceFields(file.replace(/^order: 7$/m, 'order: "7"')).order === 7, 'a quoted order still reads as a number');
+  expect(toResourceFields('---\ntitle: "x"\n---\n').category === 'General', 'a missing category falls back to General');
+
+  expect(resourceSlug('Quiet Tools!') === 'quiet-tools', 'resource filenames are kebab-case');
+  expect(validateResource({ title: 'No link' }).length === 1, 'a resource without a link is refused');
+  expect(validateResource({ title: 'Good', url: 'https://example.com' }).length === 0, 'a complete resource passes');
+  expect(validateResource({ title: 'Bad', url: 'javascript:alert(1)' }).length === 1, 'a javascript: URL is refused');
+
+  /* Every resource already in the repository must survive the desk's round trip. */
+  const existing = fs.existsSync(resourcesDir)
+    ? fs.readdirSync(resourcesDir).filter((name) => name.endsWith('.md'))
+    : [];
+  let roundTrips = 0;
+  for (const name of existing) {
+    const first = toResourceFields(fs.readFileSync(path.join(resourcesDir, name), 'utf8'));
+    const second = toResourceFields(buildResourceFile(first));
+    if (
+      first.title && /^https?:\/\//.test(first.url) && Number.isInteger(first.order) &&
+      second.title === first.title && second.url === first.url &&
+      second.category === first.category && second.order === first.order
+    ) roundTrips += 1;
+    else fail(`${name} round trip`, JSON.stringify(first));
+  }
+  expect(roundTrips === existing.length, `all ${existing.length} existing resources survive a read → write → read round trip`);
+}
+
+/* --------------------------- the settings in the repo ---------------------- */
+
+console.log('');
+console.log('  Settings — the file in your repository');
+console.log('  --------------------------------------');
+
+{
+  expect(fs.existsSync(settingsFile), 'src/data/settings.json exists');
+  const text = fs.readFileSync(settingsFile, 'utf8');
+  const parsed = parseSettings(text);
+  expect(parsed.ok, 'src/data/settings.json parses', parsed.error || '');
+  if (parsed.ok) {
+    expect(serializeSettings(parsed.data) === text, 'it is stored in the desk’s canonical form, so saves diff cleanly');
+    const merged = mergeSettings(parsed.data);
+    expect(Boolean(merged.title.trim()), 'the site has a title');
+    expect(Boolean(byId(merged.typography.body)) && Boolean(byId(merged.typography.heading)), 'the typefaces are ids the font library knows');
+    expect(TEXT_SIZES.includes(merged.typography.size), 'the reading size is one of small, medium, large');
+    expect(merged.social.every((link) => typeof link.label === 'string' && typeof link.url === 'string'), 'every social link is a { id, label, url } row');
+    expect(validateSettings(merged).length === 0, 'the stored settings pass validation', validateSettings(merged).join(' / '));
+  }
+
+  /* The technical configuration stays in site.config.js and is not owner-editable. */
+  const configSource = fs.readFileSync(path.join(root, 'src/site.config.js'), 'utf8');
+  expect(configSource.includes('mergeSettings(stored)'), 'site.config.js merges settings.json over the defaults');
+  expect(configSource.includes('settingsPath') && configSource.includes('resourcesDir'), 'the desk config carries the settings and resources paths');
+}
+
 /* ---------------------------------- base64 --------------------------------- */
 
 console.log('');
@@ -234,6 +401,32 @@ console.log('  -------------------');
     expect(remote.length === 0, 'no remote script is loaded by the desk', remote.join(', '));
     expect(html.includes('GitHub token'), 'the lock screen asks for a token');
 
+    /* The lock screen speaks to visitors first, and folds the token form away. */
+    expect(/This page is for the owner/.test(html), 'the lock screen tells visitors whose page it is');
+    const lockHtml = html.slice(html.indexOf('data-view="lock"'), html.indexOf('data-view="library"'));
+    expect(lockHtml.includes('data-back-to-site') && lockHtml.includes('href="/"'), 'visitors get a way back to the site');
+    expect(lockHtml.includes('href="/blog/"'), 'and a nudge toward the reading they came for');
+    expect(
+      lockHtml.includes('data-owner-details') &&
+        lockHtml.indexOf('data-lock-form') > lockHtml.indexOf('data-owner-details'),
+      'the token form sits inside the owner’s fold'
+    );
+    const lockSettings = parseSettings(fs.readFileSync(settingsFile, 'utf8'));
+    if (lockSettings.ok && mergeSettings(lockSettings.data).author.email) {
+      expect(/data-request-access/.test(lockHtml) && /mailto:/.test(lockHtml), 'with an email in settings, visitors can request access');
+    }
+
+    /* The Settings view ships in the same page. */
+    expect(html.includes('data-view="settings"'), 'the desk page carries a settings view');
+    expect(html.includes('data-settings-save'), 'with a save button');
+    for (const heading of ['Site identity', 'About you', 'Social links', 'Appearance', 'Newsletter', 'Resources']) {
+      expect(html.includes(heading), `the settings view has a “${heading}” section`);
+    }
+    expect(html.includes('src/data/settings.json') && html.includes('src/content/resources'), 'the desk knows where settings and resources live');
+    expect(/data-social-add="custom"/.test(html), 'custom social links can be added');
+    expect(/data-setting="typography\.body"/.test(html) && /data-setting="typography\.size"/.test(html), 'the appearance pickers are bound');
+    expect(html.includes('data-type-preview'), 'the appearance section has a live preview');
+
     const sitemap = fs.existsSync(path.join(outDir, 'sitemap.xml'))
       ? fs.readFileSync(path.join(outDir, 'sitemap.xml'), 'utf8')
       : '';
@@ -256,10 +449,15 @@ console.log('  -------------------');
 /* ------------------------------- the real build ----------------------------- */
 
 const written = [];
+let settingsBackup = null;
 
 function cleanup() {
   for (const file of written) {
     try { fs.unlinkSync(file); } catch { /* already gone */ }
+  }
+  if (settingsBackup !== null) {
+    try { fs.writeFileSync(settingsFile, settingsBackup); } catch { /* restore failed — say so loudly */ }
+    settingsBackup = null;
   }
 }
 process.on('exit', cleanup);
@@ -326,6 +524,32 @@ if (fullBuild) {
     written.push(cover);
   }
 
+  /* A resource file, exactly as the Settings view's Resources editor commits it. */
+  const testResource = path.join(resourcesDir, 'desk-test-resource.md');
+  if (!fs.existsSync(testResource)) {
+    fs.writeFileSync(testResource, buildResourceFile({
+      title: 'Desk Test Resource',
+      url: 'https://example.com/desk-test',
+      category: 'Testing',
+      description: 'Committed by the desk test, deleted straight after.',
+      order: 99,
+    }));
+    written.push(testResource);
+  }
+
+  /* A settings override, exactly as Save settings commits it — the original is
+     kept in memory and restored by cleanup(), whatever happens. */
+  if (fs.existsSync(settingsFile)) {
+    settingsBackup = fs.readFileSync(settingsFile, 'utf8');
+    fs.writeFileSync(settingsFile, serializeSettings(mergeSettings({
+      ...JSON.parse(settingsBackup),
+      title: 'The Slow Draft (desk test)',
+      hero: { heading: 'A hero written by the desk test.' },
+      author: { aboutHeading: 'An About heading from settings.' },
+      typography: { body: 'inter', heading: 'poppins', size: 'large' },
+    })));
+  }
+
   if (!problems.length) {
     process.stdout.write(`\n  Wrote ${written.length} files the way the desk does. Building… `);
     try {
@@ -361,6 +585,21 @@ if (fullBuild) {
     const draftSlug = slugify(CASES[1].fields.title);
     expect(!fs.existsSync(path.join(outDir, 'blog', draftSlug)), 'the draft stayed out of the build');
     expect(!rss.includes(draftSlug) && !sitemap.includes(draftSlug), 'the draft reached neither feed nor sitemap');
+
+    /* The settings the desk committed, built into the site. */
+    const home = fs.readFileSync(path.join(outDir, 'index.html'), 'utf8');
+    expect(home.includes('The Slow Draft (desk test)'), 'the settings title reached the home page');
+    expect(home.includes('A hero written by the desk test.'), 'the hero heading came from settings.json');
+    expect(/font-inter/.test(home) && /size-large/.test(home), 'the appearance picks became body classes');
+    expect(home.includes('Poppins'), 'the heading typeface became a CSS variable');
+    expect(rss.includes('The Slow Draft (desk test)'), 'the settings title reached rss.xml');
+
+    const about = fs.readFileSync(path.join(outDir, 'about', 'index.html'), 'utf8');
+    expect(about.includes('An About heading from settings.'), 'the About heading override reached /about/');
+
+    const resourcesPage = fs.readFileSync(path.join(outDir, 'resources', 'index.html'), 'utf8');
+    expect(resourcesPage.includes('Desk Test Resource'), 'the desk-written resource reached /resources/');
+    expect(resourcesPage.includes('https://example.com/desk-test'), 'with its link');
 
     cleanup();
     written.length = 0;

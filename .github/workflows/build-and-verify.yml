@@ -5,9 +5,10 @@
 #
 #   1. build          — does Astro accept every markdown file?
 #   2. check:desk     — does the writing desk still render markdown, round-trip
-#                       frontmatter and ship a page that is noindex?
+#                       frontmatter and settings, and ship a page that is noindex?
 #   3. check:desk:ui  — can you still unlock, write, publish, draft, rename and
-#                       recover a post? (a whole session, driven through a DOM)
+#                       recover a post, and edit the site's settings and
+#                       resources? (whole sessions, driven through a DOM)
 #   4. check:links    — does every local link, font path and asset in the output resolve?
 #
 # 2 and 3 are what stop /write/ from quietly breaking: the desk has no server, so

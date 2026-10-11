@@ -6,8 +6,10 @@ in a GitHub repository, GitHub Actions rebuilds the site on every merge to
 unlimited deploys, no credits, no third-party host.
 
 The private writing desk at `/write/` comes with it: open it on your phone,
-paste your GitHub token once, and publish. The desk commits straight to the
-repository; the merge to `main` is what rebuilds the site.
+paste your GitHub token once, and publish — or open its **Settings** view to
+change the site's title, hero, About card, social links, typography, newsletter
+inbox and resources. The desk commits straight to the repository; the merge to
+`main` is what rebuilds the site.
 
 ## How the pieces fit together
 
@@ -16,7 +18,7 @@ repository; the merge to `main` is what rebuilds the site.
 | `haydaycreates/haydaycreates.github.io` | the repository: posts, design, full history of every change |
 | `.github/workflows/deploy-github-pages.yml` | on every merge to `main`: build → verify → publish to Pages |
 | `.github/workflows/build-and-verify.yml` | on every push and pull request: build, exercise the desk, audit links |
-| `/write/` — the writing desk | where you actually write; talks only to `api.github.com` |
+| `/write/` — the writing desk | where you write **and edit the site's own settings**; talks only to `api.github.com` |
 | Netlify (`theslowdraft.netlify.app`) | the **old** host — retire it (below) so it stops costing credits |
 | Cloudflare Pages | the optional future move — unlimited bandwidth, ten minutes |
 
@@ -32,8 +34,8 @@ npm run verify     # build + the two desk suites + the link audit
 Requires **Node 22.12+**. `npm run verify` should end with:
 
 ```
-  55 checks passed. …The writing desk is safe to publish from.
-  89 checks passed across 9 sessions.
+  123 checks passed. …The writing desk is safe to publish from.
+  172 checks passed across 14 sessions.
   Every local link, font path and asset resolves. Safe to deploy.
 ```
 
@@ -113,7 +115,9 @@ in one click.
 Then write:
 
 1. Go to `https://haydaycreates.github.io/write/` (or tap **Write** in the header).
-2. Paste the token, choose *Keep on this device*, and press **Unlock the desk**.
+2. The lock screen greets visitors; yours is the fold that says **Are you
+   \<your first name\>? Unlock the desk** — open it, paste the token, choose
+   *Keep on this device*, and press **Unlock the desk**.
 3. **New post** → type a title (the address fills itself in) → write.
 4. Leave the switch on **Draft** while you work — a draft is excluded from the
    build entirely. Tap **✎ Pens** for the colours, highlighters and typefaces.
@@ -124,9 +128,10 @@ rebuilds; the page watches for the new post and tells you when it is live —
 usually a minute or two on GitHub Actions, with its own page, an entry on the
 blog index, a tag page and a place in the RSS feed.
 
-Anyone else who opens `/write/` sees only the lock screen: without your token
-the page cannot read or write a single file, and it makes no network request at
-all.
+Anyone else who opens `/write/` sees only the lock screen: a note that the page
+is yours, a way back to the site, and a button that opens their own mail app to
+request access. Without your token the page cannot read or write a single file,
+and it makes no network request at all.
 
 ---
 
@@ -141,6 +146,15 @@ highlighters and nine typefaces; 🖼 uploads a photo from the camera roll into
 **Half-finished?** Leave it on **Draft** and press **Save draft**. It is
 committed to the repository but excluded from the build, so it exists nowhere on
 the live site. Open it from the library later and switch it to **Published**.
+
+**Changing the site itself?** Library → **Settings**: the site title and
+tagline, the home-page hero, your About card (including a portrait upload), the
+social links, the typefaces and reading size with a live preview, the newsletter
+inbox, and the resources on `/resources/`. **Save settings** commits
+`src/data/settings.json` in one commit; the Pages workflow rebuilds and the
+change is live a minute or two later — the same pipeline as a post. Each
+resource add, edit, reorder and delete commits its own markdown file in
+`src/content/resources/` as you make it.
 
 **Straight from github.com (no desk):** open `src/content/blog/`, press
 **Add file → Create new file**, write the frontmatter and body, and commit to
@@ -247,13 +261,14 @@ Run through this once after the first Pages deploy. Every line should hold.
 | 1 | Site loads | `https://haydaycreates.github.io/` — the warm paper design, fonts loaded (headings in Playfair Display, body in Lora) |
 | 2 | Every page works | Home, About, Resources, Blog, one post — no 404s |
 | 3 | Feed and sitemap | `/rss.xml` shows your posts and the github.io address; `/sitemap.xml` lists every page |
-| 4 | The desk is private | `/write/` shows the lock screen — and in a private window with no token, the browser's Network panel shows **no requests at all** |
+| 4 | The desk is private | `/write/` tells visitors the page is the owner's, with a way back to the site and a request-access email; the token form waits behind an "Are you …?" fold. In a private window with no token, the browser's Network panel shows **no requests at all** |
 | 5 | The desk unlocks | Paste your token → your library of posts appears, each marked Live or Draft |
 | 6 | A post publishes | New post → switch to **Published** → **Publish** → the done screen counts down and the post appears on the live site a minute or two later |
 | 7 | A draft stays private | Save a post as **Draft** → it appears nowhere on the site, and the deploy still succeeds |
 | 8 | Images upload | Tap 🖼 in the toolbar and choose a photo → it is committed to `public/uploads/` and shows in the post |
 | 9 | Writing survives | Write a line, close the tab, reopen `/write/` → the library offers the unfinished post back |
-| 10 | CI is green | GitHub → **Actions** → the latest *Deploy to GitHub Pages* run has ticks next to every step |
+| 10 | Settings save | Library → **Settings** → change the tagline → **Save settings** → one commit named *Update site settings*; the live site's tagline changes a minute or two later |
+| 11 | CI is green | GitHub → **Actions** → the latest *Deploy to GitHub Pages* run has ticks next to every step |
 
 If check 6 fails, open the failed run in the **Actions** tab — the log names the
 step. The most common cause is a mistyped frontmatter field, which the *Build

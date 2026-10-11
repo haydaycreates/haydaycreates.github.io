@@ -15,8 +15,10 @@ const {
   bare = false,
 } = Astro.props;
 
-/* Typography comes from site.config.js and is applied as a body class plus two
-   CSS custom properties — exactly how the dynamic site did it. */
+/* Typography comes from the merged site settings (src/data/settings.json over
+   the defaults in src/lib/desk/settings.js — what /write/ → Settings edits) and
+   is applied as a body class plus two CSS custom properties, exactly how the
+   dynamic site did it. */
 const bodyFontId = fonts.byId(site.typography.body) ? site.typography.body : 'serif';
 const headFontId = fonts.byId(site.typography.heading) ? site.typography.heading : bodyFontId;
 const sizeId = fonts.TEXT_SIZES.includes(site.typography.size) ? site.typography.size : 'medium';
