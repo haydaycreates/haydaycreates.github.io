@@ -49,7 +49,10 @@ Pages, Cloudflare Pages, Netlify or anywhere else without configuration.
 ### Why nobody else can write
 
 - The page does nothing at all until a token is entered — a visitor who finds it
-  sees a lock screen, and not one request leaves their browser.
+  is told the page is the owner's, and gets a way back to the site plus a
+  "Request access by email" button that opens their own mail app. The token
+  form waits one tap away, behind an "Are you …?" fold, and not one request
+  leaves a visitor's browser.
 - The token is *yours*, kept in your own browser (localStorage, or sessionStorage
   if you choose "this session only"). It is never stored in the repo, the build,
   a cookie or a server.

@@ -401,6 +401,21 @@ console.log('  -------------------');
     expect(remote.length === 0, 'no remote script is loaded by the desk', remote.join(', '));
     expect(html.includes('GitHub token'), 'the lock screen asks for a token');
 
+    /* The lock screen speaks to visitors first, and folds the token form away. */
+    expect(/This page is for the owner/.test(html), 'the lock screen tells visitors whose page it is');
+    const lockHtml = html.slice(html.indexOf('data-view="lock"'), html.indexOf('data-view="library"'));
+    expect(lockHtml.includes('data-back-to-site') && lockHtml.includes('href="/"'), 'visitors get a way back to the site');
+    expect(lockHtml.includes('href="/blog/"'), 'and a nudge toward the reading they came for');
+    expect(
+      lockHtml.includes('data-owner-details') &&
+        lockHtml.indexOf('data-lock-form') > lockHtml.indexOf('data-owner-details'),
+      'the token form sits inside the owner’s fold'
+    );
+    const lockSettings = parseSettings(fs.readFileSync(settingsFile, 'utf8'));
+    if (lockSettings.ok && mergeSettings(lockSettings.data).author.email) {
+      expect(/data-request-access/.test(lockHtml) && /mailto:/.test(lockHtml), 'with an email in settings, visitors can request access');
+    }
+
     /* The Settings view ships in the same page. */
     expect(html.includes('data-view="settings"'), 'the desk page carries a settings view');
     expect(html.includes('data-settings-save'), 'with a save button');

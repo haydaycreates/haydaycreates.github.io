@@ -289,6 +289,9 @@ function openDesk({ wide = false, storage = {}, protectMain = false, noSettings 
 }
 
 async function unlock(session, token = TOKEN) {
+  /* What the owner does: open their fold, paste, submit. */
+  const fold = session.$('[data-owner-details]');
+  if (fold) fold.open = true;
   session.type('[data-token-input]', token);
   session.submit('[data-lock-form]');
   await sleep(30);
@@ -311,6 +314,18 @@ async function scenarioVisitor() {
   expect(session.github.requests.length === 0, 'nothing at all is fetched before a token exists', `${session.github.requests.length} requests`);
   expect(session.$('[data-repo-label]').textContent === `${CONFIG.owner}/${CONFIG.repo}`, 'the lock screen says which repository it writes to');
   expect(/Fine-grained/.test(session.$('.desk-help').textContent), 'the token recipe is on the page');
+
+  /* The visitor is told whose page this is, and given somewhere to go. */
+  expect(/for the owner/i.test(session.$('[data-view="lock"] h1').textContent), 'the visitor is told the page belongs to the owner', session.$('[data-view="lock"] h1').textContent);
+  expect(session.$('[data-back-to-site]')?.getAttribute('href') === '/', 'a way back to the site is one tap away');
+  const request = session.$('[data-request-access]');
+  expect(
+    Boolean(request) && request.getAttribute('href').startsWith('mailto:') && /subject=/.test(request.getAttribute('href')),
+    'and a short request reaches the owner by email',
+    request?.getAttribute('href')?.slice(0, 60)
+  );
+  expect(session.$('[data-owner-details]').open === false, 'the token form stays folded away until the owner opens it');
+  expect(session.github.requests.length === 0, 'showing all of that still fetched nothing', `${session.github.requests.length} requests`);
 }
 
 async function scenarioBadToken() {
@@ -326,13 +341,18 @@ async function scenarioBadToken() {
     headers: new Map(),
   });
 
-  await unlock(session, 'github_pat_expired');
+  /* Deliberately not through unlock(): the fold starts closed, the way it
+     does when a saved token is tried on page load. */
+  session.type('[data-token-input]', 'github_pat_expired');
+  session.submit('[data-lock-form]');
+  await sleep(60);
   const note = session.$('[data-lock-note]');
 
   expect(session.view() === 'lock', 'a rejected token leaves you on the lock screen', session.view());
   expect(/rejected/i.test(note.textContent), 'it says the token was rejected', note.textContent);
   expect(/new fine-grained token/i.test(note.textContent), 'it says what to do about it', note.textContent);
   expect(note.classList.contains('is-error'), 'the message is styled as an error');
+  expect(session.$('[data-owner-details]').open === true, 'and the owner fold opens, so the message is actually seen');
   expect(!session.window.localStorage.getItem('slowdraft.desk.token'), 'a bad token is not stored on the device');
 
   global.fetch = session.github.fetchMock;

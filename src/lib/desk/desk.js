@@ -187,6 +187,11 @@ export function mountDesk(root) {
       say(lockNote, `${error.message}${hint}`, true);
       client = null;
       account = null;
+      /* The message lives inside the owner's fold. When the attempt came from
+         a token saved on the device, the fold is closed — open it, or the
+         owner would stare at a lock screen that says nothing. */
+      const ownerFold = $('[data-owner-details]', root);
+      if (ownerFold) ownerFold.open = true;
     } finally {
       if (submit) {
         submit.disabled = false;
